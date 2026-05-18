@@ -53,6 +53,21 @@ export function useFiles() {
   ]);
 
   async function openPath(path: string, opts: { bypassNewWindow?: boolean } = {}) {
+    // Folder arg (typically from `solomd <dir>` CLI or drag-drop of a
+    // directory) → adopt as workspace folder + reveal file tree, instead
+    // of trying to `read_file` on it (which would fail).
+    try {
+      const isDir = await invoke<boolean>('path_is_dir', { path });
+      if (isDir) {
+        workspace.setFolder(path);
+        if (!settings.showFileTree) settings.toggleFileTree();
+        toasts.success(`Opened folder: ${path.split(/[\\/]/).pop() ?? path}`);
+        return;
+      }
+    } catch (e) {
+      console.warn('path_is_dir check failed, falling back to file open', e);
+    }
+
     // Spawn a new Tauri window with the path in the query string when the
     // user has opted in. Only applies when the current window already has
     // at least one tab (fresh-launch first file should stay in this window).

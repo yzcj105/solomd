@@ -25,6 +25,15 @@ pub async fn read_file(path: String) -> Result<FileReadResult, String> {
         .map_err(|e| format!("join: {e}"))?
 }
 
+/// Cheap check for whether a path on disk is a directory. Used by the
+/// frontend's `openPath` to route folder arguments (e.g. from the
+/// `solomd` CLI) to the workspace-folder code path instead of trying
+/// to `read_file` on them.
+#[tauri::command]
+pub fn path_is_dir(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 pub fn read_file_inner(path: String) -> Result<FileReadResult, String> {
     let bytes = fs::read(&path).map_err(|e| format!("read failed: {e}"))?;
 

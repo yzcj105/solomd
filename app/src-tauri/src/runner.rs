@@ -605,6 +605,7 @@ pub fn run_with(initial_file: Option<String>) {
         .manage(recipe_runner::RecipesState::new())
         .invoke_handler(tauri::generate_handler![
             commands::read_file,
+            commands::path_is_dir,
             commands::read_binary_file,
             commands::write_file,
             commands::write_binary_file,
