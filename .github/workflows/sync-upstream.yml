@@ -1,0 +1,72 @@
+# Keep this fork's main branch current with upstream (zhitongblog/solomd).
+#
+# Runs weekly. Fetches upstream/main and fast-forward-or-merges it into
+# main, then pushes. main is treated as a pure downstream mirror of
+# upstream here — no local-only commits are expected to land on it, so
+# an ordinary merge should always be conflict-free. If upstream and this
+# fork's main ever DO diverge (e.g. someone commits directly to main),
+# the merge step fails loudly instead of force-pushing over anything —
+# check the workflow run and resolve by hand.
+#
+# No secrets required — GITHUB_TOKEN (auto-provided) has repo:write on
+# this fork already.
+
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # every Monday 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/zhitongblog/solomd.git
+
+      - name: Fetch upstream
+        run: git fetch upstream main
+
+      - name: Check for new commits
+        id: check
+        run: |
+          behind=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "This fork's main is $behind commit(s) behind upstream/main."
+
+      - name: Merge upstream/main
+        if: steps.check.outputs.behind != '0'
+        run: |
+          set -euo pipefail
+          # Plain merge, not --ff-only: upstream's history and this
+          # fork's history aren't required to be a strict fast-forward
+          # of each other even in the no-local-commits case (e.g. tag
+          # objects, tree layout at fork time). A real conflict here
+          # means main diverged from being a pure mirror — fail loudly
+          # rather than force anything.
+          git merge upstream/main --no-edit
+
+      - name: Push
+        if: steps.check.outputs.behind != '0'
+        run: git push origin main
