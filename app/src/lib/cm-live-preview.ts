@@ -22,7 +22,10 @@ import {
   ViewPlugin,
   ViewUpdate,
 } from '@codemirror/view';
+import { frozenDuringComposition, isImeSafeFlushTransaction } from './cm-ime-guard';
 import { tags as t } from '@lezer/highlight';
+import { isDragging, isDragEndTransaction } from './cm-drag-aware';
+import { bulletDeco, hrDeco, listItemHasTask, type MdSyntaxNode } from './cm-live-render';
 
 // Marker node names (from @lezer/markdown) we want to hide off-line.
 // LinkMark (brackets) and CodeMark (backticks) intentionally kept visible —
@@ -45,7 +48,23 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+      // IME composition guard (#108) — see cm-ime-guard.ts. Rebuilding the
+      // marker-hiding decorations on the composing line aborts the Sogou IME
+      // on Windows; freeze + map-through-changes until composition commits.
+      const frozen = frozenDuringComposition(update, this.decorations);
+      if (frozen) {
+        this.decorations = frozen;
+        return;
+      }
+      // Skip marker-toggle rebuilds during pointer drag-selection — see
+      // cm-drag-aware.ts for the Windows WebView2 pointer-capture reason.
+      const dragEnded = update.transactions.some(isDragEndTransaction);
+      const imeFlush = update.transactions.some(isImeSafeFlushTransaction);
+      if (update.docChanged || update.viewportChanged || dragEnded || imeFlush) {
+        this.decorations = this.build(update.view);
+        return;
+      }
+      if (update.selectionSet && !isDragging(update.state)) {
         this.decorations = this.build(update.view);
       }
     }
@@ -62,11 +81,55 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
           from,
           to,
           enter: (node) => {
-            if (!HIDDEN_MARK_NODES.has(node.name)) return;
+            const name = node.name;
             const line = view.state.doc.lineAt(node.from).number;
-            // Keep markers visible on the line(s) the cursor / selection touches.
-            if (line >= fromLine && line <= toLine) return;
-            builder.add(node.from, node.to, hideDeco);
+            // Keep everything raw on the line(s) the cursor / selection touches.
+            const onCaretLine = line >= fromLine && line <= toLine;
+
+            if (HIDDEN_MARK_NODES.has(name)) {
+              if (onCaretLine) return;
+              // v4.3.5 #83 — gulp the single trailing space after the ATX
+              // marker so H1..H6 text aligns at the same visual column. Each
+              // heading line has its own font-size; a leftover " " character
+              // at 1.85em vs 1.1em prints visibly different widths and made
+              // the headings look staggered.
+              let to_ = node.to;
+              if (name === 'HeaderMark') {
+                const lineObj = view.state.doc.lineAt(node.from);
+                if (lineObj.from === node.from && node.to - node.from <= 6) {
+                  const after = view.state.doc.sliceString(node.to, Math.min(node.to + 1, view.state.doc.length));
+                  if (after === ' ') to_ = node.to + 1;
+                }
+              }
+              builder.add(node.from, to_, hideDeco);
+              return;
+            }
+
+            // v4.7.1 — same list / horizontal-rule rendering as the liveEdit
+            // extension (cm-live-render.ts), so the edit-mode livePreview toggle
+            // is consistent: a heading that renders shouldn't sit above a bullet
+            // list that doesn't.
+            if (name === 'ListMark') {
+              if (onCaretLine || node.to <= node.from) return;
+              const mark = view.state.doc.sliceString(node.from, node.to);
+              const isBullet = mark === '-' || mark === '*' || mark === '+';
+              if (!isBullet) return; // ordered list keeps its number
+              if (listItemHasTask(node.node as unknown as MdSyntaxNode)) {
+                const after = view.state.doc.sliceString(
+                  node.to,
+                  Math.min(node.to + 1, view.state.doc.length),
+                );
+                builder.add(node.from, after === ' ' ? node.to + 1 : node.to, hideDeco);
+              } else {
+                builder.add(node.from, node.to, bulletDeco);
+              }
+              return;
+            }
+            if (name === 'HorizontalRule') {
+              if (onCaretLine || node.to <= node.from) return;
+              builder.add(node.from, node.to, hrDeco);
+              return;
+            }
           },
         });
       }
@@ -122,21 +185,17 @@ const liveTheme = EditorView.theme({
   '.cm-line': {
     fontVariantLigatures: 'none',
   },
-  // Block-level: code fences look like real code blocks. We use
-  // box-shadow inset instead of background-color so it paints UNDER
-  // the selection layer (.cm-selectionBackground), keeping the
-  // text-selection highlight visible inside code fences (issue #).
-  '.cm-line:has(.tok-monospace)': {
-    boxShadow: 'inset 0 0 0 9999px var(--bg-hover)',
-  },
   '.tok-meta, .cm-formatting, .ͼe': {
     color: 'var(--text-faint)',
   },
-  // Selection layer must paint over the inline-code background too —
-  // bump z-index so .cm-selectionBackground sits above .tok-monospace
-  // span backgrounds (issue: 在 `` 中选择字符没有高亮).
-  '.cm-selectionLayer': { zIndex: '1' },
-  '.cm-selectionBackground': { zIndex: '1' },
+  // CM6's `layer` extension writes inline `style="z-index: -2"` on
+  // `.cm-selectionLayer`, parking selection beneath the per-char
+  // backgrounds painted by `t.monospace`. Need `!important` to beat
+  // the inline style; 45% alpha keeps glyphs readable underneath.
+  '.cm-selectionLayer': { zIndex: '2 !important' },
+  '.cm-selectionBackground': {
+    backgroundColor: 'rgba(255,159,64,0.45) !important',
+  },
 });
 
 /** Full live-preview extension bundle. Pass `[]` to disable. */
@@ -145,6 +204,45 @@ export function livePreviewExtension() {
 }
 
 /** Just the rich highlight style without hiding markers (raw source mode). */
+// Plain-source highlight used when the livePreview toggle is OFF. Unlike
+// `markdownRichStyle` it applies NO font-size / font-weight / italic changes
+// to markdown structure — headings stay body-sized, `**bold**` and `# head`
+// read as literal source. Only light token COLORS remain (plus full syntax
+// highlighting inside fenced code, which is genuinely code). This keeps the
+// source ↔ live toggle meaningfully distinct: "off" is plain editing, "on" is
+// a rendered preview — instead of both looking like a preview. (User ask,
+// 2026-06-20: "没打开实时预览时标题还是被预览了 / 两个按钮等于一样了".)
+export const markdownPlainStyle = HighlightStyle.define([
+  { tag: t.heading1, color: 'var(--md-h1)' },
+  { tag: t.heading2, color: 'var(--md-h2)' },
+  { tag: t.heading3, color: 'var(--md-h3)' },
+  { tag: t.heading4, color: 'var(--md-h4)' },
+  { tag: t.heading5, color: 'var(--md-h5)' },
+  { tag: t.heading6, color: 'var(--md-h6)' },
+  { tag: t.strong, color: 'var(--md-strong)' },
+  { tag: t.emphasis, color: 'var(--md-em)' },
+  { tag: t.strikethrough, color: 'var(--text-muted)' },
+  { tag: t.link, color: 'var(--md-link)' },
+  { tag: t.url, color: 'var(--md-url)' },
+  { tag: t.monospace, fontFamily: 'var(--font-mono)', color: 'var(--md-code)' },
+  { tag: t.quote, color: 'var(--md-quote)' },
+  { tag: t.list, color: 'var(--md-list)' },
+  { tag: t.processingInstruction, color: 'var(--text-faint)' },
+  { tag: t.contentSeparator, color: 'var(--md-hr)' },
+  // Fenced-code syntax — genuinely code, keep the colors (no size changes).
+  { tag: t.keyword, color: 'var(--syn-keyword)' },
+  { tag: t.string, color: 'var(--syn-string)' },
+  { tag: t.number, color: 'var(--syn-number)' },
+  { tag: t.comment, color: 'var(--syn-comment)' },
+  { tag: t.function(t.variableName), color: 'var(--syn-function)' },
+  { tag: t.variableName, color: 'var(--syn-variable)' },
+  { tag: t.typeName, color: 'var(--syn-type)' },
+  { tag: t.propertyName, color: 'var(--syn-property)' },
+  { tag: t.operator, color: 'var(--syn-operator)' },
+  { tag: t.punctuation, color: 'var(--text-muted)' },
+  { tag: t.bracket, color: 'var(--text-muted)' },
+]);
+
 export function richHighlightOnly() {
-  return [syntaxHighlighting(markdownRichStyle)];
+  return [syntaxHighlighting(markdownPlainStyle)];
 }

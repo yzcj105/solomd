@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import Icon from './Icons.vue';
+import BrandMark from './BrandMark.vue';
 import PomodoroPopover from './PomodoroPopover.vue';
 import { useTabsStore } from '../stores/tabs';
 import { useSettingsStore } from '../stores/settings';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useTilesStore } from '../stores/tiles';
 import { track } from '../lib/telemetry';
+import { getPlainSelection } from '../lib/plain-selection';
 import { useFiles } from '../composables/useFiles';
 import { useExport } from '../composables/useExport';
 import { useToastsStore } from '../stores/toasts';
 import { cleanAIArtifacts } from '../lib/clean-ai';
 import { useI18n } from '../i18n';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { isIOS } from '../lib/platform';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isIOS, isMacOS } from '../lib/platform';
 import { IS_APP_STORE_BUILD } from '../lib/app-build';
+import { EditorView } from '@codemirror/view';
 
 const { t } = useI18n();
 
@@ -34,6 +39,53 @@ const exporter = useExport();
 const toasts = useToastsStore();
 
 const isMarkdown = computed(() => tabs.activeTab?.language === 'markdown');
+
+// v4.6 unified title bar (macOS only). With `titleBarStyle: "Overlay"` in
+// tauri.conf, the red/yellow/green traffic lights float over the top-left of
+// our toolbar instead of sitting in a separate native title bar above it —
+// one combined bar (Tolaria-style). We reserve ~72px on the left for them and
+// make the bar background draggable. Windows / Linux keep native decorations
+// and get neither the pad nor the drag region. Computed once at module init
+// (platform doesn't change at runtime).
+const macTitleBar = isMacOS();
+
+// #127 — drag the window by the title bar. The declarative
+// `data-tauri-drag-region` attribute proved unreliable on macOS once the
+// unified title bar shipped (the empty spacer carried the attr yet the window
+// would not move). Drive the OS drag explicitly via `startDragging()` on
+// mousedown over any non-interactive region of the bar, and replicate the
+// native double-click-to-zoom. Listener is in the capture phase so it fires
+// before any child stops propagation, and only runs inside the Tauri shell.
+function isInteractiveTitleBarTarget(el: EventTarget | null): boolean {
+  const node = el as HTMLElement | null;
+  return !!node?.closest?.(
+    'button, input, select, textarea, a, [contenteditable="true"], .dropdown__menu, [data-no-drag]',
+  );
+}
+function onTitleBarMouseDown(e: MouseEvent) {
+  if (!macTitleBar || e.button !== 0 || e.detail > 1) return;
+  if (isInteractiveTitleBarTarget(e.target)) return;
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  void getCurrentWindow().startDragging();
+}
+function onTitleBarDblClick(e: MouseEvent) {
+  if (!macTitleBar) return;
+  if (isInteractiveTitleBarTarget(e.target)) return;
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  void getCurrentWindow().toggleMaximize();
+}
+
+// #134 — when the bar overflows on a narrow window, let a plain mouse wheel
+// scroll it horizontally so the clipped buttons stay reachable (trackpads
+// already emit horizontal deltas natively). Leave Ctrl/Cmd+wheel alone — that
+// is the app-wide zoom gesture handled in App.vue.
+function onToolbarWheel(e: WheelEvent) {
+  if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
+  const el = e.currentTarget as HTMLElement;
+  if (el.scrollWidth <= el.clientWidth) return;
+  el.scrollLeft += e.deltaY;
+  e.preventDefault();
+}
 
 /**
  * v2.5 F6 — open the CJK proofread panel. App.vue listens for this
@@ -86,23 +138,51 @@ function onAIRewrite() {
   // would either replace the whole doc on accept (data loss surprise) or
   // splice the translation at the cursor (also surprising). Force explicit
   // selection.
-  const cm = document.querySelector('.cm-editor.cm-focused') as HTMLElement | null;
-  const sel = window.getSelection();
-  if (!cm || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
-    toasts.info('Select some text first, then click AI rewrite (or press ⌘J).');
+  //
+  // #95 fix: don't require .cm-focused. The user's complaint was that
+  // after closing the rewrite overlay and clicking the toolbar button
+  // again, "Select some text first" fired even though the selection
+  // box was clearly still visible. The overlay's close path returns
+  // focus to the editor on the next tick, so by the time the button
+  // click event reaches this handler the .cm-focused class is briefly
+  // absent — but the DOM Selection is unchanged. Accept any .cm-editor
+  // on the page; the selection check below is what matters.
+  // Read the selection from CodeMirror's state — NOT window.getSelection().
+  // On Windows WebView2 the DOM Selection comes back empty for the CM editor
+  // (its drawSelection-managed selection isn't exposed via getSelection), so
+  // the old read made AI rewrite wrongly report "Select some text first" even
+  // with text selected. CM state is the source of truth and matches the ⌘J
+  // path (cm-ai-rewrite.ts dispatchOpen). Also lets us pass the real from/to
+  // instead of 0/0.
+  const editors = [
+    document.querySelector<HTMLElement>('.cm-editor.cm-focused'),
+    ...Array.from(document.querySelectorAll<HTMLElement>('.cm-editor')),
+  ].filter((e): e is HTMLElement => e != null);
+  let picked: { selection: string; from: number; to: number } | null = null;
+  for (const el of editors) {
+    const view = EditorView.findFromDOM(el);
+    if (!view) continue;
+    const main = view.state.selection.main;
+    if (main.empty) continue;
+    const text = view.state.sliceDoc(main.from, main.to);
+    if (text.trim()) {
+      picked = { selection: text, from: main.from, to: main.to };
+      break;
+    }
+  }
+  // #126 — Windows has NO CodeMirror view since the 4.6.4 plain-editor swap,
+  // so the scan above finds nothing there; ask the plain editor's selection
+  // registry before giving up (textareas keep selectionStart/End on blur).
+  if (!picked) {
+    picked = getPlainSelection();
+  }
+  if (!picked) {
+    const jChord = isMacOS() ? '⌘J' : 'Ctrl+J';
+    toasts.info(`Select some text first, then click AI rewrite (or press ${jChord}).`);
     return;
   }
-  const selection = sel.toString();
-  if (!selection.trim()) {
-    toasts.info('Select some text first, then click AI rewrite (or press ⌘J).');
-    return;
-  }
-  const from = 0;
-  const to = 0;
   window.dispatchEvent(
-    new CustomEvent('solomd:ai-rewrite-open', {
-      detail: { selection, from, to },
-    }),
+    new CustomEvent('solomd:ai-rewrite-open', { detail: picked }),
   );
 }
 
@@ -162,7 +242,6 @@ async function onOpenExternal() {
 const recentOpen = ref(false);
 const exportOpen = ref(false);
 const newOpen = ref(false);
-const copyOpen = ref(false);
 const insertOpen = ref(false);
 const pomoOpen = ref(false);
 
@@ -170,8 +249,6 @@ const newBtnRef = ref<HTMLElement | null>(null);
 const recentBtnRef = ref<HTMLElement | null>(null);
 const exportBtnRef = ref<HTMLElement | null>(null);
 const insertBtnRef = ref<HTMLElement | null>(null);
-const copyBtnRef = ref<HTMLElement | null>(null);
-
 const menuPos = ref<{ top: number; left?: number; right?: number } | null>(null);
 const floatStyle = computed<Record<string, string | number> | undefined>(() => {
   if (!menuPos.value) return undefined;
@@ -209,6 +286,28 @@ function dispatchInsert(snippet: string) {
   insertOpen.value = false;
 }
 
+async function pickAndInsertImage() {
+  insertOpen.value = false;
+  const sel = await openFileDialog({
+    multiple: false,
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tiff'] },
+    ],
+  });
+  if (typeof sel !== 'string') return;
+  window.dispatchEvent(
+    new CustomEvent('solomd:insert-image-path', {
+      detail: { path: sel, paneId: tiles.focusedPaneId },
+    }),
+  );
+}
+
+// Insert an image by external URL (网络图片) — opens the dialog mounted in App.vue.
+function openImageUrlDialog() {
+  insertOpen.value = false;
+  window.dispatchEvent(new CustomEvent('solomd:open-image-url-dialog'));
+}
+
 function shortPath(p: string) {
   const parts = p.split(/[\\/]/);
   return parts[parts.length - 1] || p;
@@ -220,24 +319,21 @@ function closeAllDropdowns() {
   newOpen.value = false;
   recentOpen.value = false;
   exportOpen.value = false;
-  copyOpen.value = false;
   insertOpen.value = false;
   pomoOpen.value = false;
 }
 // Exclusive open: opening one dropdown closes others.
-function toggleDropdown(name: 'new' | 'recent' | 'export' | 'copy' | 'insert') {
+function toggleDropdown(name: 'new' | 'recent' | 'export' | 'insert') {
   const isOpen =
     (name === 'new' && newOpen.value) ||
     (name === 'recent' && recentOpen.value) ||
     (name === 'export' && exportOpen.value) ||
-    (name === 'copy' && copyOpen.value) ||
     (name === 'insert' && insertOpen.value);
   closeAllDropdowns();
   if (!isOpen) {
     if (name === 'new') { positionMenuFromButton(newBtnRef.value); newOpen.value = true; }
     else if (name === 'recent') { positionMenuFromButton(recentBtnRef.value); recentOpen.value = true; }
     else if (name === 'export') { positionMenuFromButton(exportBtnRef.value); exportOpen.value = true; }
-    else if (name === 'copy') { positionMenuFromButton(copyBtnRef.value, 'right'); copyOpen.value = true; }
     else if (name === 'insert') { positionMenuFromButton(insertBtnRef.value); insertOpen.value = true; }
   }
 }
@@ -267,10 +363,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="toolbar">
-    <div class="toolbar__brand">
-      <span class="brand__hash">#</span><span class="brand__md">MD</span>
-    </div>
+  <div
+    class="toolbar"
+    :class="{ 'toolbar--mac': macTitleBar }"
+    @mousedown.capture="onTitleBarMouseDown"
+    @dblclick="onTitleBarDblClick"
+    @wheel="onToolbarWheel"
+  >
+    <BrandMark class="toolbar__brand" :size="22" />
+
+    <span
+      v-if="tabs.activeTab?.fileName"
+      class="toolbar__title"
+      :title="tabs.activeTab?.filePath || tabs.activeTab?.fileName"
+    >{{ tabs.activeTab.fileName }}</span>
 
     <div class="toolbar__group">
       <div class="dropdown">
@@ -317,12 +423,20 @@ onBeforeUnmount(() => {
             <button
               v-for="p in workspace.recentFiles"
               :key="p"
-              class="dropdown__item"
+              class="dropdown__item dropdown__item--recent"
               @mousedown.prevent="files.openPath(p); recentOpen = false"
               :title="p"
             >
               <span class="dropdown__name">{{ shortPath(p) }}</span>
               <span class="dropdown__path">{{ p }}</span>
+              <!-- #112 — remove ONE stale entry without touching the file
+                   (the only management before this was nuke-the-whole-list). -->
+              <span
+                class="dropdown__remove"
+                role="button"
+                :title="t('toolbar.removeRecent')"
+                @mousedown.stop.prevent="workspace.removeRecent(p)"
+              >✕</span>
             </button>
             <div v-if="workspace.recentFiles.length" class="dropdown__sep"></div>
             <button
@@ -381,6 +495,9 @@ onBeforeUnmount(() => {
             </button>
             <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsMarkdown(); exportOpen = false">
               <span class="dropdown__name">{{ t('toolbar.copyMarkdown') }}</span>
+            </button>
+            <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsImage(); exportOpen = false">
+              <span class="dropdown__name">{{ t('toolbar.copyImage') }}</span>
             </button>
           </div>
         </Teleport>
@@ -445,6 +562,12 @@ onBeforeUnmount(() => {
             <button class="dropdown__item dropdown__item--single" @mousedown.prevent="dispatchInsert('[$|$](url)')">
               <span class="dropdown__name">{{ t('toolbar.insertLink') }}</span>
             </button>
+            <button class="dropdown__item dropdown__item--single" @mousedown.prevent="pickAndInsertImage()">
+              <span class="dropdown__name">{{ t('toolbar.insertImage') }}</span>
+            </button>
+            <button class="dropdown__item dropdown__item--single" @mousedown.prevent="openImageUrlDialog()">
+              <span class="dropdown__name">{{ t('toolbar.insertNetworkImage') }}</span>
+            </button>
             <button class="dropdown__item dropdown__item--single" @mousedown.prevent="dispatchInsert('> $|$')">
               <span class="dropdown__name">{{ t('toolbar.insertQuote') }}</span>
             </button>
@@ -475,46 +598,6 @@ onBeforeUnmount(() => {
         <span class="ai-rewrite-label">AI</span>
         <span class="ai-rewrite-spark">✨</span>
       </button>
-    </div>
-
-    <div class="toolbar__group">
-      <div class="copy-split">
-        <button
-          class="copy-split__main"
-          @click="exporter.copyAsHtml()"
-          :title="t('toolbar.copyTooltip')"
-        >
-          <Icon name="export" :size="14" />
-          {{ t('toolbar.copy') }}
-        </button>
-        <div class="dropdown">
-          <button
-            ref="copyBtnRef"
-            class="copy-split__arrow"
-            @click="toggleDropdown('copy')"
-            :title="t('toolbar.copyFormats')"
-          >
-            <Icon name="chevron-down" :size="10" />
-          </button>
-          <Teleport to="body">
-            <div v-if="copyOpen" class="dropdown__menu dropdown__menu--narrow copy-dropdown" :style="floatStyle">
-              <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsHtml(); copyOpen = false">
-                <span class="dropdown__name">{{ '📋 ' + t('toolbar.copyHtml') }}</span>
-                <span class="dropdown__shortcut">⇧⌘C</span>
-              </button>
-              <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsMarkdown(); copyOpen = false">
-                <span class="dropdown__name">{{ '📝 ' + t('toolbar.copyMarkdown') }}</span>
-              </button>
-              <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsPlainText(); copyOpen = false">
-                <span class="dropdown__name">{{ '📄 ' + t('toolbar.copyPlain') }}</span>
-              </button>
-              <button class="dropdown__item dropdown__item--single" @mousedown.prevent="exporter.copyAsImage(); copyOpen = false">
-                <span class="dropdown__name">{{ '🖼 ' + t('toolbar.copyImage') }}</span>
-              </button>
-            </div>
-          </Teleport>
-        </div>
-      </div>
     </div>
 
     <div class="toolbar__spacer"></div>
@@ -574,7 +657,7 @@ onBeforeUnmount(() => {
         <Icon :name="settings.livePreview ? 'live' : 'source'" />
       </button>
       <button
-        v-if="settings.viewMode === 'split' || settings.viewMode === 'preview'"
+        v-if="settings.viewMode === 'split' || settings.viewMode === 'preview' || settings.viewMode === 'reading'"
         class="icon-btn"
         @click="settings.togglePreviewFitWidth"
         :class="{ active: settings.previewFitWidth }"
@@ -669,27 +752,37 @@ onBeforeUnmount(() => {
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   user-select: none;
-  /* NB: do NOT set overflow on this element. Each toolbar group hosts
-     `.dropdown__menu` items via `position: absolute`, which need to
-     escape this strip downward into the editor area. v3.6.0 added
-     `overflow-x: auto` here to address Mac narrow-window clipping
-     (issue #181) — but the browser then escalated overflow-y to
-     auto/clip too, so every dropdown (New / Open / Insert / Copy /
-     Export) was silently truncated and click events fell through to
-     the editor below. v3.6.1 reverts the overflow rule; the original
-     #181 fix needs to be redone with `<Teleport>` for dropdowns or a
-     media-query-based group collapse. Tracked for v3.7. */
+  /* #134 — on narrow windows the button groups used to overflow the strip and
+     become unclickable (no scroll). The old #181 attempt at `overflow-x: auto`
+     was reverted because dropdown menus were `position: absolute` inside the
+     bar and got clipped. They are now `<Teleport>`-ed to <body> (see the
+     `.dropdown__menu` blocks below) and repositioned on scroll via
+     `onViewportChange`, so the strip can scroll horizontally without clipping
+     any menu. overflow-y stays hidden so a stray vertical scrollbar can't eat
+     into the thin title bar. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox: hide the bar, keep wheel/trackpad scroll */
+}
+/* WebKit: hide the horizontal scrollbar so it doesn't shrink the ~40px bar. */
+.toolbar::-webkit-scrollbar { height: 0; width: 0; }
+/* v4.6 unified title bar — macOS only. The native traffic-light buttons are
+   overlaid at the top-left by `titleBarStyle: "Overlay"`; reserve room for
+   them so they don't sit on top of the brand / New button. ~72px clears the
+   three 12px lights + their inset. Windows / Linux keep native decorations
+   and never get this class, so their toolbar starts flush-left as before. */
+.toolbar--mac {
+  padding-left: 72px;
 }
 .toolbar > * { flex-shrink: 0; }
 .toolbar__brand {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.02em;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex: 0 0 22px;
   margin-right: 4px;
+  pointer-events: none;
 }
-.brand__hash { color: var(--accent); }
-.brand__md { color: var(--text); }
 
 .toolbar__group {
   display: flex;
@@ -783,60 +876,25 @@ onBeforeUnmount(() => {
   display: inline-block;
 }
 
-/* Split copy button: [Copy | ▾] */
-.copy-split {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  /* NOTE: no overflow:hidden here — it would clip the dropdown menu */
-  position: relative;
-}
-.copy-split__main {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 10px !important;
-  font-size: 12px !important;
-  color: var(--text-muted);
-  border: none;
-  border-radius: 6px 0 0 6px;
-  transition: all 0.15s;
-}
-.copy-split__main:hover {
-  color: var(--accent);
-  background: var(--bg-hover);
-}
-.copy-split__arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  padding: 0 !important;
-  border: none;
-  border-left: 1px solid var(--border);
-  border-radius: 0 6px 6px 0;
-  color: var(--text-faint);
-}
-.copy-split__arrow:hover {
-  color: var(--accent);
-  background: var(--bg-hover);
-}
-/* The menu lives inside `.copy-split > .dropdown`, but if `.dropdown`
- * is `position: relative` here the menu anchors to the 22 px chevron
- * arrow and looks misaligned (issue #31). Demote that one `.dropdown`
- * to static so the menu falls back to the wrapping `.copy-split`
- * (which is relative), letting `right: 0` line up with the right edge
- * of the whole Copy + chevron widget. */
-.copy-split > .dropdown {
-  position: static;
-}
-.copy-dropdown {
-  right: 0;
-  left: auto;
-  min-width: 220px;
-}
 .toolbar__spacer { flex: 1 1 0; min-width: 0; }
+/* Document title sits right after the SoloMD mark, mirroring a native window
+   title (VSCode / macOS Notes style). min-width:0 + flex-shrink:1 lets it
+   ellipsis-shrink on narrow windows instead of pushing tool groups off the
+   right edge (overrides `.toolbar > * { flex-shrink: 0 }`). */
+.toolbar__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-left: 4px;
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+  min-width: 0;
+  flex-shrink: 1;
+  cursor: default;
+}
 .toolbar__divider {
   width: 1px;
   height: 16px;
@@ -864,9 +922,9 @@ onBeforeUnmount(() => {
   min-width: 280px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  z-index: 100;
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-pop);
+  z-index: var(--z-pop);
   padding: 4px;
   max-height: 360px;
   overflow-y: auto;
@@ -905,6 +963,31 @@ onBeforeUnmount(() => {
 .dropdown__item--muted {
   color: var(--text-muted);
   font-size: 11px;
+}
+/* #112 — per-entry recents removal. Hidden until the row is hovered so the
+   list stays clean; sits over the right edge of the (column-flex) row. */
+.dropdown__item--recent {
+  position: relative;
+  padding-right: 26px;
+}
+.dropdown__remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+}
+.dropdown__item--recent:hover .dropdown__remove {
+  display: inline-block;
+}
+.dropdown__remove:hover {
+  color: var(--text);
+  background: var(--bg-hover);
 }
 .dropdown__item--single {
   flex-direction: row;

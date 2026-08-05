@@ -19,6 +19,9 @@ import { openPath } from '@tauri-apps/plugin-opener';
 import { useDailyNotes } from './useDailyNotes';
 import { usePandocExport } from './usePandocExport';
 import { useBasesView } from './useBasesView';
+import { useInboxView } from './useInboxView';
+import { useInbox } from './useInbox';
+import { useSavedViews } from './useSavedViews';
 import { useAutoCommit } from './useAutoCommit';
 import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { useGitHistoryStore } from '../stores/gitHistory';
@@ -45,6 +48,9 @@ export function useCommands(): Command[] {
   const daily = useDailyNotes();
   const pandoc = usePandocExport();
   const bases = useBasesView();
+  const inboxView = useInboxView();
+  const inbox = useInbox();
+  const savedViews = useSavedViews();
   const auto = useAutoCommit();
   const gh = useGitHistoryStore();
   const ws = useWorkspaceStore();
@@ -69,6 +75,38 @@ export function useCommands(): Command[] {
     const rel = tab.filePath.slice(folderNorm.length).split('\\').join('/');
     const lang = settings.language === 'zh' ? '/zh' : '';
     return `https://solomd.app${lang}/share/?repo=${m[1]}/${m[2]}&path=${encodeURIComponent(rel)}`;
+  }
+
+  /**
+   * Repository-backed Git URL for the active note (Tolaria-parity "Copy Note
+   * Git URL"). Builds `<host>/<owner>/<repo>/blob/<branch>/<path>` from the
+   * linked remote + default branch, normalising ssh/https remotes. GitHub +
+   * GitLab (which uses `/-/blob/`) are handled; other hosts fall through to the
+   * GitHub-style `/blob/` path. Returns null when not in a git-linked workspace
+   * or no note is open.
+   */
+  function activeGitUrl(): string | null {
+    const folder = ws.currentFolder;
+    const tab = tabs.activeTab;
+    if (!folder || !tab?.filePath) return null;
+    const remote = ghSync.status?.remote_url ?? '';
+    // host + owner/repo from either git@host:owner/repo.git or https://host/owner/repo(.git)
+    const m = remote.match(/(?:@|:\/\/)([^/:]+)[:/]([^/]+)\/(.+?)(?:\.git)?$/i);
+    if (!m) return null;
+    const [, host, owner, repo] = m;
+    const branch = 'main';
+    const sep = tab.filePath.includes('\\') ? '\\' : '/';
+    const folderNorm = folder.endsWith(sep) ? folder : folder + sep;
+    if (!tab.filePath.startsWith(folderNorm)) return null;
+    const rel = tab.filePath
+      .slice(folderNorm.length)
+      .split('\\')
+      .join('/')
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/');
+    const blobSeg = /gitlab/i.test(host) ? '/-/blob/' : '/blob/';
+    return `https://${host}/${owner}/${repo}${blobSeg}${branch}/${rel}`;
   }
 
   /** Replace the active editor's content (used for the Chinese conversion commands). */
@@ -126,8 +164,13 @@ export function useCommands(): Command[] {
     { id: 'view.toggleRightSidebar', title: 'View: Toggle Right Sidebar', hint: 'Hide / show the Outline / Backlinks / Tags / History / Agent strip without losing per-pane preferences', shortcut: 'Ctrl+Alt+B', run: () => settings.toggleRightSidebar() },
     { id: 'view.toggleAgentPanel', title: 'View: Toggle Agent Panel', hint: 'Right-side chat-with-vault panel — streamed multi-turn AI with tool-call cards, persisted run history, and trace replay', run: () => settings.toggleAgentPanel() },
     { id: 'view.toggleBacklinks', title: 'View: Toggle Backlinks Pane', run: () => settings.toggleBacklinks() },
+    { id: 'view.relationships', title: 'View: Toggle Relationships Pane', hint: 'Typed relationships — forward edges authored in YAML front matter plus computed inverses (Referenced by)', run: () => settings.toggleRelationships() },
     { id: 'view.toggleTagsPanel', title: 'View: Toggle Tags Pane', run: () => settings.toggleTagsPanel() },
+    { id: 'view.toggleNeighborhood', title: 'View: Toggle Neighborhood Pane', hint: 'Per-note relationship explorer — frontmatter wikilink groups, inverse relationships, and backlinks; click to open, ⌘/Ctrl-click to pivot', run: () => settings.toggleNeighborhood() },
+    { id: 'view.toggleTypesPanel', title: 'View: Toggle Types Pane', hint: 'Type-driven sidebar — notes with `type:<Name>` grouped into collapsible first-class sections (types-as-lenses)', run: () => settings.toggleTypesPanel() },
+    { id: 'type.create', title: 'Types: New Type…', hint: 'Create a type-definition note (`type: Type`) so its members get a first-class sidebar section', run: () => { if (!settings.showTypesPanel) settings.toggleTypesPanel(); window.dispatchEvent(new CustomEvent('solomd:create-type')); } },
     { id: 'view.toggleHistoryPanel', title: 'View: Toggle History Pane', hint: 'Show / hide the per-note version history pane (does not disable Auto-Git)', run: () => settings.toggleHistoryPanel() },
+    { id: 'view.toggleInspector', title: 'View: Toggle Properties Inspector', shortcut: 'Ctrl+Shift+I', hint: 'Edit the active note’s YAML frontmatter as typed properties (text / number / date / status / tags / relation)', run: () => settings.toggleInspector() },
     { id: 'view.resetSidebarPanes', title: 'View: Reset Sidebar Pane Heights', hint: 'Clear stored per-pane heights so the right sidebar returns to even-share flex layout', run: () => settings.clearRightSidebarPaneHeights() },
     { id: 'view.toggleWrap', title: 'View: Toggle Word Wrap', run: () => settings.toggleWordWrap() },
     { id: 'view.toggleLineNumbers', title: 'View: Toggle Line Numbers', run: () => settings.toggleLineNumbers() },
@@ -211,6 +254,63 @@ export function useCommands(): Command[] {
       shortcut: 'Ctrl+Shift+J',
       hint: 'Half-/full-width punct, 的/地/得 misuse, repeats, spacing',
       run: () => window.dispatchEvent(new CustomEvent('solomd:open-cjk-proofread')),
+    },
+
+    {
+      id: 'editor.find',
+      title: 'Find / Replace in note…',
+      shortcut: 'Ctrl+F',
+      hint: 'Open the find & replace bar in the current editor',
+      run: () =>
+        window.dispatchEvent(
+          new CustomEvent('solomd:editor-find', { detail: { paneId: tiles.focusedPaneId } }),
+        ),
+    },
+
+    {
+      id: 'editor.insertImage',
+      title: 'Insert image…',
+      hint: 'Pick an image — it is copied into the note’s attachments folder and a Markdown image link is inserted',
+      run: async () => {
+        if (!tabs.activeTab) {
+          toasts.warning('No active document');
+          return;
+        }
+        const sel = await openFileDialog({
+          multiple: false,
+          filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tiff'] }],
+        });
+        if (typeof sel !== 'string') return;
+        window.dispatchEvent(
+          new CustomEvent('solomd:insert-image-path', {
+            detail: { path: sel, paneId: tiles.focusedPaneId },
+          }),
+        );
+      },
+    },
+
+    {
+      id: 'editor.insertImageUrl',
+      title: 'Image from URL…',
+      hint: 'Insert a Markdown image link for an external image URL (image host / 图床)',
+      run: () => window.dispatchEvent(new CustomEvent('solomd:open-image-url-dialog')),
+    },
+
+    {
+      id: 'image.uploadLocalImages',
+      title: 'Upload local images to image host…',
+      hint: 'Upload every local image in this note to the configured image host and rewrite the links',
+      run: () => {
+        if (!tabs.activeTab) {
+          toasts.warning('No active document');
+          return;
+        }
+        window.dispatchEvent(
+          new CustomEvent('solomd:upload-local-images', {
+            detail: { paneId: tiles.focusedPaneId },
+          }),
+        );
+      },
     },
 
     {
@@ -301,6 +401,18 @@ export function useCommands(): Command[] {
       run: () => bases.openBases(),
     },
     {
+      id: 'views.toggle',
+      title: 'View: Toggle Saved Views Panel',
+      hint: 'Show / hide the Saved Views section in the left sidebar',
+      run: () => settings.toggleViewsPanel(),
+    },
+    {
+      id: 'views.create',
+      title: 'View: Create Saved View…',
+      hint: 'Define a persistent filtered note list (saved to .solomd/views/)',
+      run: () => savedViews.newView(),
+    },
+    {
       id: 'history.initWorkspace',
       title: 'History: Initialize Git History',
       hint: 'Run `git init` + initial commit of all .md/.txt files in this workspace',
@@ -356,6 +468,20 @@ export function useCommands(): Command[] {
         }
         await writeText(url);
         toasts.success('Share link copied. Note must be in a public GitHub repo to render.');
+      },
+    },
+    {
+      id: 'note.copyGitUrl',
+      title: 'Copy Note Git URL',
+      hint: 'Copy the repository-backed URL (host/owner/repo/blob/main/path) for the active note',
+      run: async () => {
+        const url = activeGitUrl();
+        if (!url) {
+          toasts.warning('Open a note in a Git-linked workspace first.');
+          return;
+        }
+        await writeText(url);
+        toasts.success('Git URL copied to clipboard.');
       },
     },
 
@@ -430,6 +556,33 @@ export function useCommands(): Command[] {
         } catch (e) {
           console.error('failed to create window', e);
         }
+      },
+    },
+
+    // v4.6 F6 — Inbox workflow command-palette entries.
+    {
+      id: 'inbox.open',
+      title: 'Open Inbox',
+      hint: 'Review notes flagged `inbox: true` — Week / Month / All, ⌘E to organize & advance',
+      run: () => {
+        if (!settings.inboxWorkflowEnabled) {
+          toasts.info('Enable the Inbox workflow in Settings first');
+          return;
+        }
+        inboxView.openInbox();
+      },
+    },
+    {
+      id: 'inbox.organizeAndAdvance',
+      title: 'Inbox: Mark Organized & Advance',
+      shortcut: 'Ctrl+E',
+      hint: 'Set `inbox: false` on the active note and jump to the next inbox note',
+      run: () => {
+        if (!settings.inboxWorkflowEnabled) {
+          inbox.toggleActive();
+          return;
+        }
+        void inbox.organizeAndAdvance();
       },
     },
   ];

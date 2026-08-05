@@ -58,11 +58,44 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            // v4.3.0 issue #73 — resource shrinking is DISABLED because of
+            // https://issuetracker.google.com/402800800: AGP 8.x errors out
+            // with "Multiple shrunk-resources files found" when
+            // `isShrinkResources = true` is combined with `splits.abi.enable
+            // = true` and the `bundle*` task is invoked. R8 fullMode +
+            // minifyEnabled still strip dead code and most resource refs;
+            // we lose only the ~1-3 MB of orphan-drawable/string pruning.
+            // Re-enable once AGP ships the fix (tracked upstream).
+            // isShrinkResources = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
+            // v4.3.0 issue #73 — strip debug symbols from native .so libs in
+            // release. Tauri's Rust binary normally compiles with `strip = "symbols"`
+            // in Cargo.toml, but this provides a belt-and-braces guarantee.
+            packaging {
+                jniLibs {
+                    keepDebugSymbols.clear()
+                    // useLegacyPackaging defaults to false in AGP 7+, which
+                    // means .so files stay compressed inside the APK rather
+                    // than being extracted to /data/app on install — halves
+                    // the disk footprint vs legacy mode.
+                }
+                resources {
+                    // Cut Kotlin metadata, license files, and module manifests
+                    // that JVM-side tooling reads but Android runtime ignores.
+                    excludes += setOf(
+                        "/META-INF/{AL2.0,LGPL2.1}",
+                        "/META-INF/*.kotlin_module",
+                        "/META-INF/versions/**",
+                        "/kotlin/**",
+                        "/kotlin-tooling-metadata.json",
+                        "/DebugProbesKt.bin",
+                    )
+                }
+            }
             val cfg = signingConfigs.getByName("release")
             if (cfg.storeFile != null) {
                 signingConfig = cfg

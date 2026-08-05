@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { useCommands, type Command } from '../composables/useCommands';
+import { useI18n } from '../i18n';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -8,13 +9,31 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const query = ref('');
 const selectedIdx = ref(0);
 const inputRef = ref<HTMLInputElement | null>(null);
+const listRef = ref<HTMLUListElement | null>(null);
+// #92 — itemRefs are populated by the template's :ref="..." callback so
+// we can scrollIntoView the active item when the keyboard moves selection.
+// Without this the viewport stayed pinned to the top and the user couldn't
+// see what they had highlighted past the first ~8 visible rows.
+const itemRefs = ref<(HTMLElement | null)[]>([]);
+function setItemRef(el: Element | unknown, i: number) {
+  itemRefs.value[i] = (el as HTMLElement) ?? null;
+}
 const allCommands = useCommands();
+const { t } = useI18n();
+
+// #177 — localized command titles. `t()` falls back to English for any id
+// missing in a locale, so this is always displayable.
+function localizedTitle(c: Command): string {
+  return t(`cmd.${c.id}`);
+}
 
 const filtered = computed<Command[]>(() => {
   const q = query.value.trim().toLowerCase();
   if (!q) return allCommands;
   return allCommands.filter((c) => {
-    const hay = `${c.title} ${c.id} ${c.hint ?? ''}`.toLowerCase();
+    // Match both the localized title and the original English one, so
+    // muscle-memory queries ("outline") keep working in any language.
+    const hay = `${localizedTitle(c)} ${c.title} ${c.id} ${c.hint ?? ''}`.toLowerCase();
     return q.split(/\s+/).every((tok) => hay.includes(tok));
   });
 });
@@ -35,6 +54,23 @@ watch(filtered, () => {
   selectedIdx.value = 0;
 });
 
+// #92 — scroll the selected item into view when arrow-key navigation moves
+// selection. block: 'nearest' avoids the "yank to centre" jump that a
+// plain scrollIntoView() would do every keypress. We only fire after a
+// nextTick so the DOM has settled when filtered just changed.
+// #93 — but ONLY for keyboard moves. Hovering / wheel-scrolling changes
+// selectedIdx via @mouseenter (items pass under the cursor as the list
+// scrolls); scrolling those into view fought the wheel and caused the
+// "weird jumps". `kbNav` gates the auto-scroll to keyboard navigation only.
+let kbNav = false;
+watch(selectedIdx, async () => {
+  if (!kbNav) return;
+  kbNav = false;
+  await nextTick();
+  const el = itemRefs.value[selectedIdx.value];
+  if (el) el.scrollIntoView({ block: 'nearest' });
+});
+
 function onKey(e: KeyboardEvent) {
   // CJK/IME guard — Enter / arrows during composition belong to the IME
   // (commit candidate, navigate candidate list); never let them act on
@@ -45,9 +81,11 @@ function onKey(e: KeyboardEvent) {
     emit('close');
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
+    kbNav = true;
     selectedIdx.value = Math.min(selectedIdx.value + 1, filtered.value.length - 1);
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
+    kbNav = true;
     selectedIdx.value = Math.max(selectedIdx.value - 1, 0);
   } else if (e.key === 'Enter') {
     e.preventDefault();
@@ -64,6 +102,7 @@ async function runIdx(i: number) {
 </script>
 
 <template>
+  <Teleport to="body">
   <div v-if="open" class="palette__backdrop" @click.self="emit('close')">
     <div class="palette" role="dialog" aria-label="Command palette">
       <input
@@ -74,41 +113,43 @@ async function runIdx(i: number) {
         placeholder="Type a command…"
         spellcheck="false"
       />
-      <ul class="palette__list" v-if="filtered.length">
+      <ul class="palette__list" ref="listRef" v-if="filtered.length">
         <li
           v-for="(c, i) in filtered"
           :key="c.id"
+          :ref="(el) => setItemRef(el, i)"
           class="palette__item"
           :class="{ 'palette__item--active': i === selectedIdx }"
           @click="runIdx(i)"
           @mouseenter="selectedIdx = i"
         >
-          <span class="palette__title">{{ c.title }}</span>
+          <span class="palette__title">{{ localizedTitle(c) }}</span>
           <span class="palette__shortcut" v-if="c.shortcut">{{ c.shortcut }}</span>
         </li>
       </ul>
       <div class="palette__empty" v-else>No matching command</div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .palette__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
-  z-index: 1000;
+  z-index: var(--z-modal);
 }
 .palette {
   width: min(560px, 92vw);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-pop);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -138,7 +179,7 @@ async function runIdx(i: number) {
   cursor: pointer;
 }
 .palette__item--active {
-  background: var(--bg-active);
+  background: var(--accent-soft);
 }
 .palette__shortcut {
   color: var(--text-faint);

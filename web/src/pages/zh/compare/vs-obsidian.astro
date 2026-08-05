@@ -2,8 +2,27 @@
 import Layout from '../../../layouts/Layout.astro';
 import Header from '../../../components/Header.astro';
 import Footer from '../../../components/Footer.astro';
+import CompareFaq from '../../../components/CompareFaq.astro';
 
 const lang = 'zh' as const;
+const FAQ = [
+  {
+    q: 'SoloMD 能替代 Obsidian 吗?',
+    a: '如果你的工作流是记笔记、Wiki 链接、反向链接、日常写作和知识图谱,可以 —— 这些 SoloMD 全部内置,包括自动反向的类型化关系、单篇笔记的关系图、保存的过滤视图和属性面板。如果你依赖 Obsidian 的社区插件生态,不行:SoloMD 刻意不做插件市场,所有功能都在内核里。',
+  },
+  {
+    q: '[[Wiki 链接]] 和反向链接支持吗?',
+    a: '支持。[[笔记]] 链接带自动补全,有大纲面板、反向链接面板,还有类型化关系(frontmatter 里的 belongs_to / related_to / has)和可以一跳一跳走的"邻域"关系图。全部存为纯 .md + YAML,笔记随时可迁移。',
+  },
+  {
+    q: '不订阅怎么同步?',
+    a: 'SoloMD 基于文件夹,任何文件同步都免费可用:iCloud、Dropbox、OneDrive、坚果云、Syncthing。还内置 GitHub 同步(你自己的仓库,libgit2,可选端到端加密)。没有账号体系,也没有付费同步档;Obsidian Sync 是 $5/月。',
+  },
+  {
+    q: 'SoloMD 比 Obsidian 轻多少?',
+    a: '安装包约 15 MB,Obsidian 约 110 MB;空闲内存约 80–150 MB。SoloMD 基于 Tauri 2 + Rust 后端,不是 Electron。',
+  },
+];
 ---
 
 <Layout
@@ -28,11 +47,11 @@ const lang = 'zh' as const;
       <h2>30 秒速览</h2>
       <table class="compare-detail">
         <thead>
-          <tr><th>&nbsp;</th><th>SoloMD v4.0</th><th>Obsidian 1.x</th></tr>
+          <tr><th>&nbsp;</th><th>SoloMD v4.11</th><th>Obsidian 1.x</th></tr>
         </thead>
         <tbody>
           <tr><th>定位</th><td>文档编辑器 + Agent 一等公民 + AI / 搜索 / 历史 工具集</td><td>vault / 知识库 + 插件市场</td></tr>
-          <tr><th>价格</th><td><strong>免费</strong> (MIT)</td><td>个人免费 · 商用 $50/年 · Sync $96/年</td></tr>
+          <tr><th>价格</th><td><strong>免费</strong> (MIT)</td><td>含商用全免费（2025-02 起）· Sync 选配 $5/月 · Publish $10/月</td></tr>
           <tr><th>开源</th><td>✅</td><td>❌ 核心闭源,插件开源</td></tr>
           <tr><th>安装包大小</th><td>~15 MB</td><td>~130 MB</td></tr>
           <tr><th>空闲内存</th><td>~150 MB</td><td>~400 MB</td></tr>
@@ -55,7 +74,7 @@ const lang = 'zh' as const;
           <tr><th>Wiki 双向链接</th><td>✅ <strong>v2.0</strong> · <code>[[file]]</code></td><td>✅ <code>[[file]]</code></td></tr>
           <tr><th>支持单文件打开</th><td>✅ 任意 .md</td><td>⚠️ 偏向 vault 文件夹</td></tr>
           <tr><th>多编码 (GBK/Big5)</th><td>✅</td><td>⚠️ 仅 UTF-8</td></tr>
-          <tr><th>iPad</th><td>🟡 已提交,审核中</td><td>✅ App Store</td></tr>
+          <tr><th>iPad / iOS / 安卓</th><td>✅ App Store (iPad/iOS) + Android</td><td>✅ App Store + Android</td></tr>
           <tr><th>Vim 模式</th><td>✅</td><td>✅ 核心插件</td></tr>
           <tr><th>演讲 / 幻灯片</th><td>✅ <code>⌘⌥P</code> 内置</td><td>🟡 Slides 插件</td></tr>
           <tr><th>CLI 命令行</th><td>✅ <code>solomd</code></td><td>❌</td></tr>
@@ -110,10 +129,12 @@ const lang = 'zh' as const;
 
       <h2>价格</h2>
       <p>
-        SoloMD: 免费 / MIT,无商用许可证。Obsidian: 个人免费,
-        <a href="https://obsidian.md/commercial-license" rel="external">$50/用户/年</a>商用,
-        Sync $96/年。
+        SoloMD: 免费 / MIT,无任何许可证。Obsidian: <strong>2025 年 2 月起含商用全免费</strong>
+        （此前商用需 $50/用户/年,现已取消强制）;选配
+        <a href="https://obsidian.md/pricing" rel="external">Sync $5/月</a>、Publish $10/月。
       </p>
+
+      <CompareFaq heading="常见问题" items={FAQ} />
 
       <div class="compare-cta">
         <a href="/zh/#download" class="btn btn--primary">下载 SoloMD</a>

@@ -101,11 +101,26 @@ watch(
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   },
 );
+
+// #106 — the tab strip is `overflow-x: auto` with the scrollbar hidden, so
+// when more tabs are open than fit, off-screen tabs were unreachable: a
+// vertical mouse wheel did nothing and there's no visible scrollbar. Map
+// wheel delta (whichever axis is larger) to horizontal scroll, same as
+// PaneTabBar.vue. (Middle-click already closes tabs here, so we don't add
+// middle-drag panning — wheel scroll is the fix.)
+function onTabsWheel(e: WheelEvent) {
+  const el = tabsRef.value;
+  if (!el) return;
+  const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  if (delta === 0) return;
+  el.scrollLeft += delta;
+  e.preventDefault();
+}
 </script>
 
 <template>
   <div class="tabbar">
-    <div class="tabs" ref="tabsRef">
+    <div class="tabs" ref="tabsRef" @wheel="onTabsWheel">
       <div
         v-for="tab in tabs.tabs"
         :key="tab.id"
@@ -113,6 +128,7 @@ watch(
         class="tab"
         :class="{ 'tab--active': tab.id === tabs.activeId }"
         @click="tabs.activate(tab.id)"
+        @mousedown.middle.prevent="files.closeTabSafe(tab.id)"
         @contextmenu="openMenu($event, tab.id)"
         :title="tab.filePath || tab.fileName"
       >
@@ -265,9 +281,9 @@ watch(
   padding: 4px 0;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  z-index: 1500;
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-pop);
+  z-index: var(--z-pop);
   min-width: 180px;
 }
 .tab-menu li { padding: 0; }

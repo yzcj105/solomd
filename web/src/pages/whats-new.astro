@@ -5,13 +5,13 @@ import Footer from '../components/Footer.astro';
 import Giscus from '../components/Giscus.astro';
 
 const lang = 'en' as const;
-const VERSION = '4.2.0';
+const VERSION = '4.11.9';
 const baseUrl = `https://github.com/zhitongblog/solomd/releases/download/v${VERSION}`;
 ---
 
 <Layout
-  title="What's new in SoloMD v4.0 — the editor where agents live"
-  description="v4.0 is the agent-native author release. Five pillars: Inline Agent Panel (streamed chat-with-vault), Scheduled Recipes (cron / on-save / on-commit, AutoGit branch sandbox + accept/reject), Trace View (replayable JSONL), Multi-workspace MCP Federation, and Ollama first-class polish. Plus: REST API, BYOK cost meter, recipe cookbook (11 starters), first-run wizard, ja/ko localization."
+  title={`What's new in SoloMD ${VERSION} — release notes v4.0 – v4.11`}
+  description={`SoloMD ${VERSION} release notes. v4.11: malformed tables from AI/PDF exports now auto-repair and render, plus opt-in numbered-section headings (6.2 → h2) across app, CLI and MCP. v4.8: image hosting (PicGo / SM.MS / S3 / GitHub) + quality-of-life fixes (select-all, trash-safe delete, unified line breaks). v4.7: Windows editor rewritten on native textareas — CJK IME finally reliable. v4.6: knowledge graph (typed relationships, saved views, properties inspector) + tldraw whiteboards. v4.0: the agent-native author release — Inline Agent Panel, Scheduled Recipes, Trace View, MCP Federation.`}
   lang={lang}
 >
   <Header lang={lang} />
@@ -23,7 +23,7 @@ const baseUrl = `https://github.com/zhitongblog/solomd/releases/download/v${VERS
 
       <p class="version-row">
         <span class="version-tag">v{VERSION}</span>
-        <time>May 2026</time>
+        <time>Aug 2026</time>
       </p>
       <h1>The editor where agents live.</h1>
       <p class="lead">
@@ -41,7 +41,436 @@ const baseUrl = `https://github.com/zhitongblog/solomd/releases/download/v${VERS
       </div>
 
       <section>
-        <h2>The five pillars</h2>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.9</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.9 — zoom that keeps its aim, and four asked-for comforts.</h2>
+        <ul>
+          <li><strong>⌘+/⌘- zoom no longer breaks click targeting on macOS.</strong> Zoom now goes through the system webview (like Safari's), so the caret lands exactly under the pointer at any zoom level. (#192)</li>
+          <li><strong>The sidebar can't get stuck hidden anymore.</strong> Opening the outline — or any pane — from the shortcut, Settings, or the tab bar now also brings the auto-hidden sidebar back. (#207)</li>
+          <li><strong>Command palette speaks your language.</strong> All 85 commands follow Settings → Language across 14 locales; searching matches both the translated and the English name. (#177)</li>
+          <li><strong>New options:</strong> a solid (non-blinking) cursor toggle (#193) and a dedicated code font (#190). <strong>Copying tables from preview keeps their borders</strong> when pasted into mail clients. (#189)</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.8</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.8 — split view lines up, positions stick.</h2>
+        <ul>
+          <li><strong>Split view stays level.</strong> The editor and preview now track each other pixel-accurately at any scroll position — soft-wrapped paragraphs, images, and raw HTML blocks no longer pull the two panes apart, and line numbers stay glued to their lines. (#203)</li>
+          <li><strong>Your scroll position survives tab switches.</strong> On Windows, switching away and back no longer resets the view to the top — in Edit, Split, and Live Edit modes alike. (#169)</li>
+          <li><strong><code>==Highlight==</code> renders in live edit.</strong> Same treatment as bold/italic: styled off the caret line, raw source when you edit it; code blocks stay verbatim. Typewriter mode now also centers the caret line in the Windows editor. (#199)</li>
+          <li><strong>Outline jump labels past <code>az</code> are fixed.</strong> Long documents no longer show <code>aundefined</code> markers. (#206)</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.7</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.7 — one reliable Windows install path.</h2>
+        <ul>
+          <li><strong>MSI is now the only installed Windows channel.</strong> SoloMD installs to <code>C:\Program Files\SoloMD</code>; the portable ZIP remains available without installation.</li>
+          <li><strong>Old per-user installs migrate safely.</strong> On first launch from the MSI path, SoloMD verifies and removes the retired <code>%LOCALAPPDATA%\SoloMD</code> NSIS installation, including its stale shortcuts and taskbar pin.</li>
+          <li><strong>Your work and settings stay untouched.</strong> The migration never removes <code>%APPDATA%\app.solomd</code> or user documents.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.6</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.6 — Windows keeps the new icon after upgrading.</h2>
+        <ul>
+          <li><strong>Taskbar pins, shortcuts, and the running app now share one stable identity.</strong> Windows no longer falls back to an old or blank cached icon after an upgrade.</li>
+          <li><strong>This is a focused Windows hotfix.</strong> macOS and Android packages are refreshed for consistent downloads; their platform behavior is unchanged.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.5</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.5 — embedded HTML now works in live edit.</h2>
+        <ul>
+          <li><strong>Block HTML renders where you write.</strong> Containers such as <code>&lt;div&gt;</code>, <code>&lt;table&gt;</code>, and <code>&lt;details&gt;</code> now collapse into their rendered result when the caret leaves the block.</li>
+          <li><strong>Inline HTML behaves like Markdown formatting.</strong> Tags including <code>&lt;strong&gt;</code>, <code>&lt;sup&gt;</code>, <code>&lt;mark&gt;</code>, and <code>&lt;kbd&gt;</code> apply their visual meaning instead of remaining as noisy source.</li>
+          <li><strong>The source is always one click away.</strong> Moving the caret back into an HTML fragment reveals the exact markup for editing.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.4</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.4 — the new mark reaches the window chrome.</h2>
+        <ul>
+          <li><strong>The title bar now carries the new Portal mark.</strong> The legacy <code>#MD</code> text lockup is gone from the in-app toolbar.</li>
+          <li><strong>The About dialog matches.</strong> Both surfaces now render one shared brand component, so future identity updates cannot drift apart.</li>
+          <li><strong>macOS file icons are included and registered.</strong> The signed, notarized universal DMG maps Markdown files to the new warm-paper Portal document icon.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.3</span>
+          <time>Aug 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.3 — a new face, plus two fresh fixes.</h2>
+        <ul>
+          <li><strong>SoloMD has a new visual identity.</strong> The new orange <code>#</code> Portal app icon now ships consistently across macOS, Windows, Linux, iOS, Android, the App Store, and the website.</li>
+          <li><strong>Markdown files are recognizable at a glance.</strong> The default document icon is a warm paper sheet with an orange fold and the matching <code>#</code> Portal mark.</li>
+          <li><strong>Vim mode works on Windows again.</strong> Enabling Vim now switches the editor onto CodeMirror immediately, while the normal Windows editor keeps its IME-safe textarea path.</li>
+          <li><strong>Code blocks have a Copy button.</strong> Every rendered fenced block gets a pinned, accessible one-click copy action in its top-right corner.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.2</span>
+          <time>Jul 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.2 — four small fixes that were bugging you.</h2>
+        <ul>
+          <li><strong>Code blocks can wrap.</strong> New setting soft-wraps long code lines instead of a horizontal scrollbar — and PDF/print now always wraps, so wide code is never cut off on paper.</li>
+          <li><strong>Tabs remember where you were.</strong> Switching back to a tab no longer resets the view to the top when you had scrolled without clicking; line numbers stay put too.</li>
+          <li><strong>Vim <code>j</code>/<code>k</code> respect tables.</strong> Single-step motions land on a collapsed table/math/Mermaid block edge and expand it — same as the arrow keys — instead of hopping clear over.</li>
+          <li><strong>Full file names in the Explorer.</strong> New setting wraps long names instead of middle-ellipsis truncation.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11.1</span>
+          <time>Jul 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11.1 — the cursor stays where you put it.</h2>
+        <ul>
+          <li><strong>Chinese IME cursor jump fixed.</strong> Editing mid-paragraph and starting a pinyin composition right after could throw the caret to the top of the document and strand half-composed letters there — a debounced-sync race replacing the whole document mid-composition. Composition is never interrupted now, and external updates keep the caret in place.</li>
+          <li><strong>The update prompt stopped stealing your browser.</strong> Detecting a new version now shows a 12-second clickable toast; nothing opens unless you click it — and every update-related link (toast, settings check, About dialog) goes to solomd.app instead of GitHub.</li>
+          <li><strong>AI model catalog refreshed</strong> across all 14 providers (GPT-5.6 family, Grok 4.5, Claude Fable 5 / Opus 4.8, Gemini 3.6, GLM-5.2, Kimi K3 and more; retired DeepSeek v2 endpoints removed).</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.11</span>
+          <time>July 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.11 — broken tables fix themselves.</h2>
+        <ul>
+          <li><strong>Malformed tables render anyway.</strong> AI exports and PDF-to-Markdown tools often emit a delimiter row that doesn't match the header (an extra <code>|---|</code> cell, a missing one, an empty cell) — and the whole table silently collapsed into literal <code>| … |</code> text. SoloMD now repairs the delimiter row on the fly, like Typora and Obsidian, keeping each column's alignment. Code-block samples are left untouched.</li>
+          <li><strong>Numbered sections can become headings (opt-in).</strong> Reports often number sections as plain text — <code>6.2 Export licensing</code> — with no <code>#</code>. A new setting (off by default) promotes such lines to real headings by depth: <code>6.2</code> → h2, <code>6.2.1</code> → h3. Ordered lists, decimal sentences and single numbers are never touched.</li>
+          <li><strong>Headless export matches the app.</strong> The CLI (<code>solomd-export</code>, new <code>--number-headings</code> flag) and the MCP <code>export_note</code> tool (new <code>number_headings</code> arg) now run the exact same Markdown preprocessing as the in-app preview and DOCX export — one engine, identical output everywhere.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.10</span>
+          <time>July 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.10 — PlantUML + a preview width slider.</h2>
+        <ul>
+          <li><strong>PlantUML diagrams (opt-in).</strong> <code>```plantuml</code> fences render as diagrams in the preview and in live edit, through a configurable PlantUML server. Off by default — your notes never leave the machine unless you turn it on; point it at a self-hosted server to keep rendering on your own network.</li>
+          <li><strong>Preview width is yours.</strong> The preview / reading column width is now a slider (480–1600px, was a fixed 760px). "Fit width" still stretches to the window.</li>
+          <li><strong>Tables no longer trap the caret.</strong> In live edit, ↑/↓ used to teleport clear over rendered tables — and could skip whole paragraphs below them. The caret now walks every line, steps into a table (or math / Mermaid block) to edit its source, and the block re-renders when you leave.</li>
+          <li><strong>Code-block line numbers, fixed.</strong> Numbered code blocks no longer double their line spacing, C-style <code>/** */</code> comments no longer swallow the rest of the block into row 1, and the WYSIWYG editor now honors the same line-number setting as the preview.</li>
+          <li><strong>Clicks stay clicks (4.10.1).</strong> Clicking right after a tab switch — while diagrams/images were still rendering — could select multiple lines instead of placing the caret. The caret now stays where you pressed, even when the layout shifts mid-click.</li>
+          <li><strong>Open linked files with the default app (4.10.2).</strong> A Markdown link to a local PDF / Office file (<code>[report](./report.pdf)</code>) now opens in your system's default app instead of being converted to Markdown. New setting, on by default; links to <code>.md</code> / text / images still open inside SoloMD.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.9</span>
+          <time>July 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.9 — Android real folders + editor polish.</h2>
+        <p class="lead">
+          The 4.9 line makes SoloMD open and edit your <strong>real folders on
+          Android</strong> — not a sandboxed copy. On Android 11+ (including
+          Honor / Huawei <strong>Magic OS</strong>, where the all-files
+          permission grants nothing) SoloMD now uses the <strong>Storage Access
+          Framework</strong>: pick a folder once, then read and write the actual
+          <code>.md</code> files in place, saved back through the system content
+          provider.
+        </p>
+        <ul>
+          <li><strong>Android folder vault (SAF).</strong> Open a real folder, edit files in place, full-width mobile layout.</li>
+          <li><strong>Save As fixed.</strong> It was writing empty files on Android — now the content lands in the file you choose.</li>
+          <li><strong>Find (Ctrl/⌘+F) scrolls as you type.</strong> The editor jumps to the first match while you type, like your browser — no more "found nothing" on long notes.</li>
+          <li><strong>Live-edit arrow keys cross blocks.</strong> ↑/↓/←/→ now move the caret between paragraphs in the Windows block editor — and as of 4.9.6 they respect soft-wrapped lines, so ↑ in a long paragraph no longer teleports over it.</li>
+          <li><strong>Line numbers on Windows (4.9.6).</strong> The "show line numbers" setting now works in the Windows editor, with a gutter that stays aligned under word wrap.</li>
+          <li><strong>Export Mermaid diagrams as PNG (4.9.6).</strong> Click a diagram → Export PNG or Copy image, at 2× resolution with a theme-matched background.</li>
+          <li><strong>Save dialog picks up your title (4.9.6).</strong> A never-saved note starting with <code># Heading</code> pre-fills "Heading.md" — stop retyping filenames.</li>
+          <li><strong>Linux launch fix.</strong> AppImage no longer aborts with <code>EGL_BAD_PARAMETER</code> on some Intel / Mesa setups.</li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.7</span>
+          <time>June 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.7 — Windows gets a brand-new editor.</h2>
+        <p class="lead">
+          <strong>Windows only.</strong> SoloMD on Windows now uses a completely
+          rebuilt <strong>block editor</strong> in place of CodeMirror.
+          WebView2's <code>contentEditable</code> dropped the
+          <strong>first character of CJK / IME input</strong> and
+          <strong>doubled punctuation</strong> (worst with Sogou) — a bug that
+          could not be fixed inside CodeMirror because it lives in WebView2
+          itself. The new editor types each block through a native
+          <code>&lt;textarea&gt;</code> on the OS-native IME path, so the
+          dropped-character and doubled-punctuation problems are gone.
+        </p>
+        <p>
+          The new Windows editor keeps <strong>full feature parity</strong>:
+          live Markdown preview, autocomplete &amp; slash commands
+          (<code>/</code>), focus &amp; typewriter mode, smart list continuation,
+          AI rewrite (<code>Ctrl+J</code>), in-document find &amp; replace
+          (<code>Ctrl+F</code>), clipboard image paste, task-checkbox toggle,
+          undo / redo, Tab indent, spellcheck and word-wrap.
+        </p>
+        <p style="opacity:.8;">
+          <strong>macOS, Linux, iOS and Android are unaffected</strong> — they
+          keep the existing CodeMirror editor. Also in 4.7: the command palette
+          no longer jumps when you hover or wheel-scroll the list (#93).
+        </p>
+        <p class="version-row" style="margin-top:24px;">
+          <span class="version-tag">v4.9</span>
+          <time>July 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.9 — Android opens your real vault.</h2>
+        <p class="lead">
+          On Android, SoloMD's only freely-readable folder used to be a
+          sandbox under <code>/Android/data</code> that no file manager can
+          reach on an unrooted phone — so you could never point the app at
+          your actual notes folder. 4.9 adds <strong>All-files access</strong>:
+          grant it once and <strong>Open Folder</strong> lets you browse to a
+          real vault anywhere on the device (<code>Documents</code>, a
+          Syncthing / Dropbox folder, an SD card) and <strong>edit files in
+          place</strong> — no copying into the sandbox. The file tree, search,
+          version history and save all work against your real paths (#148,
+          #151).
+        </p>
+        <p style="margin-top:14px;">
+          Also in 4.9, a sweep of reported bugs.
+          <strong>The macOS window can be dragged by its title bar again</strong>
+          (#153) — the drag call had been silently rejected by a missing
+          permission ever since the unified title bar shipped; double-click
+          to zoom is back too. <strong>The "File Changed on Disk" dialog no
+          longer interrupts typing on Android</strong> (#148) — the app's own
+          saves were mistaken for external edits because Android delivers
+          file events seconds late; changes are now judged by the file's
+          modification time instead. The update-available notice now opens
+          the solomd.app download page (reachable in mainland China, with the
+          Gitee mirror) instead of GitHub (#154), and the no-op
+          "Reveal in Finder" menu item is hidden on phones.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.8.11</strong> — three reported bugs, fixed.
+          <strong>Android can open files again</strong> (#148): files handed
+          over by a file manager, "Open with", or the in-app picker arrive as
+          <code>content://</code> URIs that no filesystem call can read — they
+          now import into the SoloMD folder (keeping the original filename, or
+          naming from the doc's first heading) and open normally, mirroring the
+          iOS Files-app flow. <strong>GitHub sync no longer pushes to
+          <code>main</code> while pulling from <code>master</code></strong>
+          (#147) — a second device could get permanently stuck never seeing the
+          first device's pushes; pull now normalizes the branch the same way
+          push does, with a fallback for legacy master-only remotes.
+          And <strong>closing a tab returns to the adjacent tab</strong>
+          instead of jumping to the first one in the list (#149 — root cause
+          contributed by the reporter, thanks!).
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.8.10</strong> — quality-of-life sweep.
+          <strong>Ctrl+A finally selects the whole document</strong> in the
+          Windows live editor (it used to stop at the current paragraph), so
+          select-all → copy / delete / type-over behaves like any other editor.
+          <strong>Deleting a file or folder now moves it to the system
+          Trash / Recycle Bin</strong> instead of erasing it permanently (#112),
+          and single entries can be removed from the Recent-files list. A new
+          <strong>“single newline = line break”</strong> setting keeps the
+          preview, the Windows live editor and every export (PDF, DOCX, Pandoc)
+          agreeing on what Enter means (#141). <strong>Font size &amp; family
+          now apply everywhere</strong> — live-edit blocks, the preview pane and
+          reading mode (#143). Switching tabs <strong>keeps your cursor and
+          scroll position</strong> (#144), “open at startup in reading mode”
+          works again with restore-tabs off, the settings pages no longer share
+          one scroll position, and the toolbar <strong>AI-rewrite button</strong>
+          works on Windows (#126).
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.8.9</strong> — iOS file opening, fixed for real. Opening a
+          Markdown file from the <strong>Files app</strong>, AirDrop or another
+          app no longer fails with "No such file or directory" (#139) — the
+          share sheet handed over a percent-encoded <code>file://</code> URL
+          that was never decoded. <strong>Recent files survive app
+          updates</strong> (iOS moves the app container on every update; stored
+          paths are re-anchored automatically), <strong>Open Folder</strong> now
+          pins the workspace to SoloMD's Documents folder, and the <strong>tab
+          bar scrolls with a swipe</strong>. Also on desktop: local
+          <strong>SVG previews</strong> stay visible across windows (#142,
+          thanks @beihai23).
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.8.1</strong> — fixes. <strong>Find &amp; Replace</strong> is
+          discoverable again (a command-palette entry; it always lived behind
+          Ctrl+F, #137). Clicking a relative <code>.md</code> link inside a
+          <strong>WSL</strong> vault no longer fails with “os error 3” (#138).
+          A pinned <strong>reading-mode</strong> startup with restore-tabs off no
+          longer opens a blank window (#128). The <strong>macOS app icon</strong>
+          is now a proper rounded squircle with margin (#111). And an
+          expired/revoked <strong>GitHub sync</strong> token now prompts you to
+          reconnect instead of throwing a raw 401.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.8.0</strong> — <strong>image hosting (图床)</strong>. Paste,
+          drop or pick an image and SoloMD can now upload it to an external
+          image host and insert the returned URL — instead of only copying it
+          into a local folder, like Typora / MarkText. Five backends:
+          <strong>PicGo</strong> (local server), a <strong>custom command</strong>
+          (PicGo-Core / uPic / any script), <strong>SM.MS</strong>,
+          <strong>S3-compatible</strong> (Aliyun OSS / Tencent COS / Cloudflare
+          R2 / MinIO), and a <strong>GitHub repo + CDN</strong>. Plus
+          “insert image from URL” and a “upload all local images in this note”
+          command. Auto-upload on paste falls back to a local copy if the host
+          is unreachable. Configure in Settings → Writing.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.7.4</strong> — <strong>Backspace / Delete</strong> are
+          reliable again in the Windows editor. Each paragraph there is its own
+          text box, so pressing Backspace at the very start of a block (or
+          Delete at its very end) used to hit the box edge and do nothing —
+          delete felt hit-or-miss. Those boundary presses now act on the whole
+          document, joining paragraphs or removing the blank line just like a
+          normal editor, with the caret and focus following along.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.7.3</strong> — <strong>PDF export</strong> no longer
+          crashes on themes or content using modern CSS color functions
+          (<code>color()</code>, <code>oklch()</code>, <code>color-mix()</code>),
+          and a failed export no longer leaves the window frozen or zoomable
+          (#115). Plus: <strong>split-view scroll sync</strong> works again on
+          Windows — the editor and preview had stopped following each other
+          after the 4.7 Windows editor rebuild.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.7.2</strong> — the file tree gets a <strong>resizable
+          sidebar</strong> (drag the edge, 180–600&nbsp;px), <strong>per-filetype
+          icons</strong>, and middle-ellipsis truncation for long filenames; the
+          macOS title bar no longer overlaps the in-app toolbar (#121). Plus a
+          <strong>PDF export fix</strong>: body paragraphs and list items are no
+          longer sliced in half across page breaks.
+        </p>
+        <p style="margin-top:14px;">
+          <strong>4.7.1</strong> — live preview now renders bullet lists, task
+          checkboxes and horizontal rules (not just headings) across macOS /
+          Linux / iOS / Android; source mode is genuinely plain again
+          (headings no longer enlarged when live-preview is off). Plus:
+          file-tree <strong>copy path / relative path</strong> (#120) and a
+          <strong>close-folder</strong> button (#118), a
+          <strong>limit-editor-width</strong> readable column (#109), and the
+          fit-width toggle now works in reading mode (#117).
+        </p>
+      </section>
+
+      <section>
+        <p class="version-row" style="margin-top:8px;">
+          <span class="version-tag">v4.6</span>
+          <time>June 2026</time>
+        </p>
+        <h2 style="margin-top:8px;">4.6 — the knowledge-graph half, built.</h2>
+        <p class="lead">
+          A full <strong>design-system + Vue component-library rebuild</strong>
+          (warm-neutral surfaces, orange <code>#ff9f40</code> accent) and a
+          <strong>unified macOS title bar</strong> (traffic lights inlined into
+          the toolbar) — plus the seven structural features that used to be the
+          one thing a knowledge-graph editor like Tolaria did and SoloMD didn't.
+          All on disk as plain <code>.md</code> / YAML. No new file format.
+        </p>
+        <div class="pillars">
+          <div class="pillar">
+            <h3>Properties inspector (<code>⌘⇧I</code>)</h3>
+            <p>
+              A dedicated frontmatter editor — date, relation, status and tag
+              pickers — instead of hand-editing YAML. Writes straight back to
+              the note's front-matter.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Type-driven sidebar</h3>
+            <p>
+              <code>type:&lt;Name&gt;</code> notes become first-class
+              collapsible sidebar sections (types-as-lenses), each with a custom
+              icon, color, order, and pinned properties.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Typed relationships</h3>
+            <p>
+              <code>belongs_to</code> / <code>related_to</code> /
+              <code>has</code> frontmatter fields with <strong>automatic
+              inverses</strong> — declare one side, the other resolves itself.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Relationship graph ("Neighborhood")</h3>
+            <p>
+              A per-note explorer of outgoing <em>and</em> inverse
+              relationships — walk the graph one hop at a time from whatever
+              note you're in.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Saved filtered views</h3>
+            <p>
+              Persistent sidebar views stored as
+              <code>.solomd/views/*.yml</code> — filter by type, status, date,
+              or regex, and they stay put across launches.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Inbox workflow</h3>
+            <p>
+              <code>⌘E</code> marks the current note organized and
+              auto-advances to the next — a real inbox-zero loop for triaging
+              captured notes.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>tldraw whiteboards</h3>
+            <p>
+              Markdown-backed boards via a <code>```tldraw</code> fence —
+              durable in the note's <code>.md</code>, and cross-compatible with
+              Tolaria's on-disk board format.
+            </p>
+          </div>
+          <div class="pillar">
+            <h3>Design-system UI + unified title bar</h3>
+            <p>
+              A warm-neutral surface palette with an orange
+              <code>#ff9f40</code> accent, rebuilt on a proper Vue component
+              library, and a unified macOS title bar that inlines the traffic
+              lights into the toolbar.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>The five pillars (v4.0)</h2>
         <p>
           Each is in core. Toggleable via a setting. Built to play
           nicely with your existing notes — no schema migration, no

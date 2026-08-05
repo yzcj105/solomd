@@ -27,6 +27,7 @@ import CloudFolderBanner from './CloudFolderBanner.vue';
 import ProxySettings from './ProxySettings.vue';
 import ThemeMarketplace from './ThemeMarketplace.vue';
 import { isIOS } from '../lib/platform';
+import { DsModal } from '../ui';
 import type { Theme } from '../types';
 
 const isMobilePlatform = isIOS();
@@ -38,6 +39,13 @@ const { t } = useI18n();
 // split into 6 groups so the user navigates by category, not by scroll.
 type SettingsCategory = 'basics' | 'writing' | 'sync' | 'integrations' | 'export' | 'advanced';
 const activeCategory = ref<SettingsCategory>('basics');
+// #144 — all six category pages share the single scrolling `.settings__body`
+// (pages are toggled via CSS display), so one page's scrollTop leaked into
+// every other page. Reset to top on each category switch.
+const bodyEl = ref<HTMLElement | null>(null);
+watch(activeCategory, () => {
+  bodyEl.value?.scrollTo({ top: 0 });
+});
 const categories: { id: SettingsCategory; icon: string; labelKey: string }[] = [
   { id: 'basics', icon: '⚙️', labelKey: 'settings.catBasics' },
   { id: 'writing', icon: '✍️', labelKey: 'settings.catWriting' },
@@ -250,12 +258,13 @@ function onSelectPdfFont(v: string) {
 </script>
 
 <template>
-  <div v-if="open" class="settings__backdrop" @click.self="emit('close')">
-    <div class="settings" role="dialog" aria-label="Settings">
-      <header class="settings__header">
-        <h2>{{ t('settings.title') }}</h2>
-        <button class="settings__close" @click="emit('close')">×</button>
-      </header>
+  <DsModal
+    :model-value="open"
+    :title="t('settings.title')"
+    width="820px"
+    class="settings-modal"
+    @update:model-value="emit('close')"
+  >
       <div class="settings__layout">
         <!-- v3.0 — left-side category nav. Click switches the right-side
              content panel; only one category visible at a time. -->
@@ -271,7 +280,7 @@ function onSelectPdfFont(v: string) {
             <span class="settings__nav-label">{{ t(c.labelKey) }}</span>
           </button>
         </nav>
-      <div class="settings__body" :data-active-cat="activeCategory">
+      <div ref="bodyEl" class="settings__body" :data-active-cat="activeCategory">
         <section data-cat="basics">
           <label>{{ t('settings.language') }}</label>
           <select
@@ -323,6 +332,18 @@ function onSelectPdfFont(v: string) {
         </section>
 
         <section data-cat="basics">
+          <label>{{ t('settings.codeFontFamily') }}</label>
+          <input
+            type="text"
+            :placeholder="t('settings.codeFontFamilyPlaceholder')"
+            :value="settings.codeFontFamily"
+            @input="settings.setCodeFontFamily(($event.target as HTMLInputElement).value)"
+            style="padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; font: inherit; width: 100%;"
+          />
+          <p class="setting-hint">{{ t('settings.codeFontFamilyHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
           <label>{{ t('settings.fontSize') }}: {{ settings.fontSize }}px</label>
           <input
             type="range"
@@ -346,6 +367,32 @@ function onSelectPdfFont(v: string) {
 
         <section data-cat="basics">
           <label>
+            {{ t('settings.globalZoom') }}:
+            {{ Math.round((settings.globalZoom || 1) * 100) }}%
+          </label>
+          <input
+            type="range"
+            min="0.75"
+            max="2.5"
+            step="0.05"
+            :value="settings.globalZoom"
+            @input="settings.setGlobalZoom(+($event.target as HTMLInputElement).value)"
+          />
+          <p class="setting-hint">
+            {{ t('settings.globalZoomHint') }}
+            <button
+              type="button"
+              class="link-button"
+              style="margin-left: 8px;"
+              @click="settings.resetZoom()"
+            >
+              {{ t('settings.globalZoomReset') }}
+            </button>
+          </p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
             <input type="checkbox" :checked="settings.wordWrap" @change="settings.toggleWordWrap()" />
             {{ t('settings.wordWrap') }}
           </label>
@@ -355,6 +402,13 @@ function onSelectPdfFont(v: string) {
           <label>
             <input type="checkbox" :checked="settings.showLineNumbers" @change="settings.toggleLineNumbers()" />
             {{ t('settings.lineNumbers') }}
+          </label>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input type="checkbox" :checked="settings.solidCursor" @change="settings.toggleSolidCursor()" />
+            {{ t('settings.solidCursor') }}
           </label>
         </section>
 
@@ -384,10 +438,124 @@ function onSelectPdfFont(v: string) {
         </section>
 
         <section data-cat="basics">
+          <label>{{ t('settings.outlineMarker') }}</label>
+          <select
+            :value="settings.outlineMarker"
+            @change="settings.setOutlineMarker(($event.target as HTMLSelectElement).value as 'jump' | 'number' | 'none')"
+          >
+            <option value="jump">{{ t('settings.outlineMarkerJump') }}</option>
+            <option value="number">{{ t('settings.outlineMarkerNumber') }}</option>
+            <option value="none">{{ t('settings.outlineMarkerNone') }}</option>
+          </select>
+        </section>
+
+        <section data-cat="basics">
           <label>
             <input type="checkbox" :checked="settings.previewFitWidth" @change="settings.togglePreviewFitWidth()" />
             {{ t('settings.previewFitWidth') }}
           </label>
+        </section>
+
+        <section data-cat="basics">
+          <label>{{ t('settings.previewMaxWidth') }}: {{ settings.previewMaxWidth }}px</label>
+          <input
+            type="range"
+            min="480"
+            max="1600"
+            step="20"
+            :value="settings.previewMaxWidth"
+            :disabled="settings.previewFitWidth"
+            @input="settings.setPreviewMaxWidth(+($event.target as HTMLInputElement).value)"
+          />
+          <p class="setting-hint">{{ t('settings.previewMaxWidthHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input type="checkbox" :checked="settings.limitEditorWidth" @change="settings.toggleLimitEditorWidth()" />
+            {{ t('settings.limitEditorWidth') || 'Limit editor width (readable column)' }}
+          </label>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.codeBlockLineNumbers"
+              @change="settings.toggleCodeBlockLineNumbers()"
+            />
+            {{ t('settings.codeBlockLineNumbers') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.codeBlockLineNumbersHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.codeBlockWrap"
+              @change="settings.toggleCodeBlockWrap()"
+            />
+            {{ t('settings.codeBlockWrap') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.codeBlockWrapHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.explorerFullNames"
+              @change="settings.toggleExplorerFullNames()"
+            />
+            {{ t('settings.explorerFullNames') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.explorerFullNamesHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.markdownHardBreaks"
+              @change="settings.toggleMarkdownHardBreaks()"
+            />
+            {{ t('settings.markdownHardBreaks') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.markdownHardBreaksHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.markdownAutoNumberHeadings"
+              @change="settings.toggleMarkdownAutoNumberHeadings()"
+            />
+            {{ t('settings.markdownAutoNumberHeadings') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.markdownAutoNumberHeadingsHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.plantumlEnabled"
+              @change="settings.togglePlantuml()"
+            />
+            {{ t('settings.plantuml') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.plantumlHint') }}</p>
+          <input
+            v-if="settings.plantumlEnabled"
+            type="text"
+            :value="settings.plantumlServer"
+            :placeholder="'https://www.plantuml.com/plantuml'"
+            spellcheck="false"
+            style="margin-top: 6px; width: 100%"
+            @change="settings.setPlantumlServer(($event.target as HTMLInputElement).value)"
+          />
         </section>
 
         <section data-cat="basics">
@@ -694,6 +862,192 @@ function onSelectPdfFont(v: string) {
           <p class="setting-hint">{{ t('settings.imageExportBrandingHint') }}</p>
         </section>
 
+        <section data-cat="writing">
+          <label>{{ t('settings.attachmentMode') }}</label>
+          <select
+            :value="settings.attachmentMode"
+            @change="settings.setAttachmentMode(($event.target as HTMLSelectElement).value as 'shared' | 'per-file' | 'custom')"
+          >
+            <option value="shared">{{ t('settings.attachmentModeShared') }}</option>
+            <option value="per-file">{{ t('settings.attachmentModePerFile') }}</option>
+            <option value="custom">{{ t('settings.attachmentModeCustom') }}</option>
+          </select>
+          <p class="setting-hint">{{ t('settings.attachmentModeHint') }}</p>
+        </section>
+
+        <section data-cat="writing" v-if="settings.attachmentMode === 'shared'">
+          <label>{{ t('settings.assetsDirName') }}</label>
+          <input
+            type="text"
+            :value="settings.assetsDirName"
+            @change="settings.setAssetsDirName(($event.target as HTMLInputElement).value)"
+            placeholder="_assets"
+            style="padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; font: inherit;"
+          />
+          <p class="setting-hint">{{ t('settings.assetsDirNameHint') }}</p>
+        </section>
+
+        <section data-cat="writing" v-if="settings.attachmentMode === 'custom'">
+          <label>{{ t('settings.attachmentCustomPath') }}</label>
+          <input
+            type="text"
+            :value="settings.attachmentCustomPath"
+            @change="settings.setAttachmentCustomPath(($event.target as HTMLInputElement).value)"
+            placeholder="./images/${filename}/"
+            style="padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; font: inherit;"
+          />
+          <p class="setting-hint">{{ t('settings.attachmentCustomPathHint') }}</p>
+        </section>
+
+        <!-- 图床 / image upload (external image hosting) — like Typora / MarkText.
+             Instead of (or alongside) copying a pasted image locally, upload it
+             to an image host and insert the returned URL. -->
+        <section data-cat="writing">
+          <label>{{ t('settings.imageUploaderSection') }}</label>
+          <select
+            :value="settings.imageUploader"
+            @change="settings.setImageUpload({ imageUploader: ($event.target as HTMLSelectElement).value as 'none' | 'picgo' | 'command' | 'smms' | 's3' | 'github' })"
+          >
+            <option value="none">{{ t('settings.imageUploaderNone') }}</option>
+            <option value="picgo">{{ t('settings.imageUploaderPicgo') }}</option>
+            <option value="command">{{ t('settings.imageUploaderCommand') }}</option>
+            <option value="smms">{{ t('settings.imageUploaderSmms') }}</option>
+            <option value="s3">{{ t('settings.imageUploaderS3') }}</option>
+            <option value="github">{{ t('settings.imageUploaderGithub') }}</option>
+          </select>
+        </section>
+
+        <template v-if="settings.imageUploader !== 'none'">
+          <section data-cat="writing">
+            <label>
+              <input
+                type="checkbox"
+                :checked="settings.imageUploadOnPaste"
+                @change="settings.setImageUpload({ imageUploadOnPaste: ($event.target as HTMLInputElement).checked })"
+              />
+              {{ t('settings.imageUploadOnPaste') }}
+            </label>
+            <p class="setting-hint">{{ t('settings.imageUploadOnPasteHint') }}</p>
+          </section>
+          <section data-cat="writing">
+            <label>
+              <input
+                type="checkbox"
+                :checked="settings.imageUploadKeepLocal"
+                @change="settings.setImageUpload({ imageUploadKeepLocal: ($event.target as HTMLInputElement).checked })"
+              />
+              {{ t('settings.imageUploadKeepLocal') }}
+            </label>
+            <p class="setting-hint">{{ t('settings.imageUploadKeepLocalHint') }}</p>
+          </section>
+
+          <!-- PicGo -->
+          <section data-cat="writing" v-if="settings.imageUploader === 'picgo'">
+            <label>{{ t('settings.picgoEndpoint') }}</label>
+            <input
+              class="img-field"
+              type="text"
+              :value="settings.picgoEndpoint"
+              @change="settings.setImageUpload({ picgoEndpoint: ($event.target as HTMLInputElement).value })"
+              placeholder="http://127.0.0.1:36677/upload"
+            />
+            <p class="setting-hint">{{ t('settings.picgoEndpointHint') }}</p>
+          </section>
+
+          <!-- Custom command -->
+          <section data-cat="writing" v-if="settings.imageUploader === 'command'">
+            <label>{{ t('settings.imageUploadCommand') }}</label>
+            <input
+              class="img-field"
+              type="text"
+              :value="settings.imageUploadCommand"
+              @change="settings.setImageUpload({ imageUploadCommand: ($event.target as HTMLInputElement).value })"
+              placeholder="picgo upload {path}"
+            />
+            <p class="setting-hint">{{ t('settings.imageUploadCommandHint') }}</p>
+          </section>
+
+          <!-- SM.MS -->
+          <section data-cat="writing" v-if="settings.imageUploader === 'smms'">
+            <label>{{ t('settings.smmsToken') }}</label>
+            <input
+              class="img-field"
+              type="password"
+              :value="settings.smmsToken"
+              @change="settings.setImageUpload({ smmsToken: ($event.target as HTMLInputElement).value })"
+            />
+            <p class="setting-hint">{{ t('settings.smmsTokenHint') }}</p>
+          </section>
+
+          <!-- S3-compatible -->
+          <template v-if="settings.imageUploader === 's3'">
+            <section data-cat="writing">
+              <label>{{ t('settings.s3Endpoint') }}</label>
+              <input class="img-field" type="text" :value="settings.s3Endpoint" @change="settings.setImageUpload({ s3Endpoint: ($event.target as HTMLInputElement).value })" placeholder="https://s3.amazonaws.com" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3Region') }}</label>
+              <input class="img-field" type="text" :value="settings.s3Region" @change="settings.setImageUpload({ s3Region: ($event.target as HTMLInputElement).value })" placeholder="us-east-1" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3Bucket') }}</label>
+              <input class="img-field" type="text" :value="settings.s3Bucket" @change="settings.setImageUpload({ s3Bucket: ($event.target as HTMLInputElement).value })" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3AccessKeyId') }}</label>
+              <input class="img-field" type="text" :value="settings.s3AccessKeyId" @change="settings.setImageUpload({ s3AccessKeyId: ($event.target as HTMLInputElement).value })" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3SecretAccessKey') }}</label>
+              <input class="img-field" type="password" :value="settings.s3SecretAccessKey" @change="settings.setImageUpload({ s3SecretAccessKey: ($event.target as HTMLInputElement).value })" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3PathPrefix') }}</label>
+              <input class="img-field" type="text" :value="settings.s3PathPrefix" @change="settings.setImageUpload({ s3PathPrefix: ($event.target as HTMLInputElement).value })" placeholder="images/" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.s3CustomDomain') }}</label>
+              <input class="img-field" type="text" :value="settings.s3CustomDomain" @change="settings.setImageUpload({ s3CustomDomain: ($event.target as HTMLInputElement).value })" placeholder="https://cdn.example.com" />
+            </section>
+            <section data-cat="writing">
+              <label>
+                <input type="checkbox" :checked="settings.s3UsePathStyle" @change="settings.setImageUpload({ s3UsePathStyle: ($event.target as HTMLInputElement).checked })" />
+                {{ t('settings.s3UsePathStyle') }}
+              </label>
+            </section>
+          </template>
+
+          <!-- GitHub repo + CDN -->
+          <template v-if="settings.imageUploader === 'github'">
+            <section data-cat="writing">
+              <label>{{ t('settings.ghImageRepo') }}</label>
+              <input class="img-field" type="text" :value="settings.ghImageRepo" @change="settings.setImageUpload({ ghImageRepo: ($event.target as HTMLInputElement).value })" placeholder="owner/repo" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.ghImageBranch') }}</label>
+              <input class="img-field" type="text" :value="settings.ghImageBranch" @change="settings.setImageUpload({ ghImageBranch: ($event.target as HTMLInputElement).value })" placeholder="main" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.ghImageToken') }}</label>
+              <input class="img-field" type="password" :value="settings.ghImageToken" @change="settings.setImageUpload({ ghImageToken: ($event.target as HTMLInputElement).value })" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.ghImagePathPrefix') }}</label>
+              <input class="img-field" type="text" :value="settings.ghImagePathPrefix" @change="settings.setImageUpload({ ghImagePathPrefix: ($event.target as HTMLInputElement).value })" placeholder="images/" />
+            </section>
+            <section data-cat="writing">
+              <label>{{ t('settings.ghImageCdn') }}</label>
+              <select
+                :value="settings.ghImageCdn"
+                @change="settings.setImageUpload({ ghImageCdn: ($event.target as HTMLSelectElement).value as 'raw' | 'jsdelivr' })"
+              >
+                <option value="jsdelivr">{{ t('settings.ghImageCdnJsdelivr') }}</option>
+                <option value="raw">{{ t('settings.ghImageCdnRaw') }}</option>
+              </select>
+            </section>
+          </template>
+        </template>
+
         <section data-cat="advanced">
           <label>{{ t('settings.dailyNotesFolder') }}</label>
           <input
@@ -828,6 +1182,24 @@ function onSelectPdfFont(v: string) {
           </label>
         </section>
 
+        <!-- v4.6 F6 — Inbox workflow -->
+        <section data-cat="writing">
+          <label>
+            <input type="checkbox" :checked="settings.inboxWorkflowEnabled" @change="settings.toggleInboxWorkflow()" />
+            {{ t('inbox.workflowSetting') }}
+          </label>
+          <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
+            {{ t('inbox.workflowSettingHint') }}
+          </div>
+          <label v-if="settings.inboxWorkflowEnabled" style="margin-top: 8px;">
+            <input type="checkbox" :checked="settings.autoAdvanceInboxAfterOrganize" @change="settings.toggleAutoAdvanceInbox()" />
+            {{ t('inbox.autoAdvanceSetting') }}
+          </label>
+          <div v-if="settings.inboxWorkflowEnabled" style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
+            {{ t('inbox.autoAdvanceSettingHint') }}
+          </div>
+        </section>
+
         <section data-cat="advanced">
           <label>
             <input type="checkbox" :checked="settings.restoreSession" @change="settings.toggleRestoreSession()" />
@@ -839,12 +1211,48 @@ function onSelectPdfFont(v: string) {
         </section>
 
         <section data-cat="advanced">
+          <label>{{ t('settings.startupViewMode') }}</label>
+          <select
+            :value="settings.startupViewMode ?? ''"
+            @change="settings.setStartupViewMode((($event.target as HTMLSelectElement).value || null) as any)"
+          >
+            <option value="">{{ t('settings.startupViewModeLastUsed') }}</option>
+            <option value="edit">Edit</option>
+            <option value="liveEdit">Live edit</option>
+            <option value="split">Split</option>
+            <option value="preview">Preview</option>
+            <option value="reading">Reading</option>
+          </select>
+          <p class="setting-hint">{{ t('settings.startupViewModeHint') }}</p>
+        </section>
+
+        <section data-cat="advanced">
+          <label>
+            <input type="checkbox" :checked="settings.perWorkspaceTabs" @change="settings.togglePerWorkspaceTabs()" />
+            {{ t('settings.perWorkspaceTabs') }}
+          </label>
+          <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
+            {{ t('settings.perWorkspaceTabsHint') }}
+          </div>
+        </section>
+
+        <section data-cat="advanced">
           <label>
             <input type="checkbox" :checked="settings.autoReloadExternalChanges" @change="settings.toggleAutoReloadExternalChanges()" />
             {{ t('settings.autoReloadExternalChanges') }}
           </label>
           <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
             {{ t('settings.autoReloadExternalChangesHint') }}
+          </div>
+        </section>
+
+        <section data-cat="advanced">
+          <label>
+            <input type="checkbox" :checked="settings.autoSaveOnBlur" @change="settings.toggleAutoSaveOnBlur()" />
+            {{ t('settings.autoSaveOnBlur') }}
+          </label>
+          <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
+            {{ t('settings.autoSaveOnBlurHint') }}
           </div>
         </section>
 
@@ -865,6 +1273,16 @@ function onSelectPdfFont(v: string) {
           </label>
           <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
             {{ t('settings.revealInFileTreeOnOpenHint') }}
+          </div>
+        </section>
+
+        <section data-cat="advanced">
+          <label>
+            <input type="checkbox" :checked="settings.openLinkedFilesExternally" @change="settings.toggleOpenLinkedFilesExternally()" />
+            {{ t('settings.openLinkedFilesExternally') }}
+          </label>
+          <div style="font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.5;">
+            {{ t('settings.openLinkedFilesExternallyHint') }}
           </div>
         </section>
 
@@ -926,34 +1344,22 @@ function onSelectPdfFont(v: string) {
         <div data-cat="integrations"><RestApiSettings /></div>
       </div>
       </div>
-    </div>
     <!-- v2.5: theme marketplace modal. Lives outside settings__body so it
-         overlays the entire viewport, but inside the settings backdrop so
-         closing settings closes it too. -->
+         overlays the entire viewport; it self-teleports to body so closing
+         settings (which unmounts DsModal) closes it too. -->
     <ThemeMarketplace
       :open="themeMarketplaceOpen"
       @close="themeMarketplaceOpen = false"
     />
-  </div>
+  </DsModal>
 </template>
 
 <style scoped>
-.settings__backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-.settings {
-  background: var(--bg-elev);
-  width: min(820px, 94vw);
-  height: min(640px, 84vh);
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+/* DsModal supplies the backdrop / frame / header (title + close). Zero its
+   body padding so the two-column nav+body layout fills the panel edge-to-edge,
+   and give the panel a fixed working height like the old shell. */
+.settings-modal :deep(.ds-modal__body) {
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
@@ -961,6 +1367,7 @@ function onSelectPdfFont(v: string) {
   flex: 1;
   display: flex;
   min-height: 0;
+  height: min(560px, 78vh);
 }
 .settings__nav {
   width: 160px;
@@ -1021,24 +1428,6 @@ function onSelectPdfFont(v: string) {
   flex-direction: column;
   gap: 8px;
 }
-.settings__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.settings__header h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.settings__close {
-  font-size: 20px;
-  line-height: 1;
-  padding: 0 6px;
-  color: var(--text-muted);
-}
 .settings__body {
   flex: 1;
   padding: 16px 22px;
@@ -1077,6 +1466,18 @@ section > label:not(:has(input)) {
 .setting-hint a {
   color: var(--accent);
   text-decoration: underline;
+}
+/* Image-upload (图床) text/password fields — match the inline-styled inputs
+   used elsewhere in this panel. */
+.img-field {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
 }
 .row {
   display: flex;

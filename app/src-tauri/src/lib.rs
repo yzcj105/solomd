@@ -1,8 +1,13 @@
 pub mod app_build;
 pub mod commands;
+// Image-bed (图床) upload: PicGo / shell command / sm.ms / S3-compatible / GitHub.
+pub mod image_upload;
 pub mod search;
 pub mod workspace_index;
 pub mod spellcheck;
+// #102 — cross-platform AI key storage (OS keyring + Android encrypted-file
+// fallback). Declared before ai_proxy, which delegates to it.
+pub mod ai_keystore;
 pub mod ai_proxy;
 // v4.0 Pillar 5: Ollama polish — detect / pull / install-page commands on
 // top of the existing chat runner in ai_proxy. Pure additive.
@@ -50,6 +55,11 @@ pub mod crypto;
 // PR #24 (@beihai23) external file-change watcher — preview mode auto-reloads,
 // edit / split modes pop a reload-vs-keep dialog.
 pub mod watcher;
+// #148 / #151 — Android all-files-access (MANAGE_EXTERNAL_STORAGE) check +
+// request, so the user can point the app at a real vault folder anywhere on
+// shared storage instead of the unreachable /Android/data sandbox.
+pub mod storage_android;
+pub mod saf_android;
 
 // v4.0 Pillar 1: in-process agent tool registry + run persistence (panel
 // chat). agent_run (RunHandle) is the canonical run-dir owner; both the
@@ -99,7 +109,13 @@ pub fn run() {
         // plugin hooks `application:openURL:` automatically and emits
         // a `deep-link://new-url` event over Tauri's event bus, which
         // App.vue's onMounted handler picks up to spawn a new tab.
-        .plugin(tauri_plugin_deep_link::init());
+        .plugin(tauri_plugin_deep_link::init())
+        // #148 — tauri-plugin-fs is registered for its Android side alone:
+        // its readFile bridges SAF `content://` URIs through ContentResolver,
+        // which std::fs can never reach. The frontend imports such deliveries
+        // into the Documents workspace (useFiles.ts importContentUri) and the
+        // rest of the app keeps operating on real filesystem paths.
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(desktop)]
     let builder = builder.plugin(
@@ -152,6 +168,21 @@ pub fn run() {
             commands::write_binary_file,
             commands::print_webview,
             commands::copy_file,
+            storage_android::android_has_all_files_access,
+            storage_android::android_request_all_files_access,
+            storage_android::android_system_insets,
+            storage_android::android_restart_app,
+            saf_android::saf_pick_folder,
+            saf_android::saf_poll_picked,
+            saf_android::saf_persisted_trees,
+            saf_android::saf_tree_root,
+            saf_android::saf_tree_name,
+            saf_android::saf_list,
+            saf_android::saf_read,
+            saf_android::saf_write,
+            saf_android::saf_create,
+            saf_android::saf_delete,
+            image_upload::upload_image,
             commands::list_dir,
             commands::fs_create_file,
             commands::fs_create_dir,
@@ -217,6 +248,9 @@ pub fn run() {
             integrations::cli_status,
             integrations::mcp_path,
             integrations::mcp_claude_desktop_config_path,
+            integrations::detect_ai_clients,
+            integrations::inject_mcp,
+            integrations::remove_mcp,
             mcp_profiles::mcp_profiles_list,
             mcp_profiles::mcp_profiles_save,
             mcp_profiles::mcp_profiles_delete,
@@ -311,6 +345,9 @@ pub fn run() {
             cookbook::cookbook_list,
             cookbook::cookbook_get,
             cookbook::cookbook_install,
+            workspace_index::workspace_index_referenced_by,
+            commands::update_frontmatter_property,
+            commands::delete_frontmatter_property,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

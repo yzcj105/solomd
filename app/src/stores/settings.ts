@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import type { Theme, ViewMode } from '../types';
-import { isIOS } from '../lib/platform';
+import { isIOS, isMobile } from '../lib/platform';
 
 const LS_KEY = 'solomd.settings.v1';
 
@@ -24,13 +24,47 @@ export function buildEditorFontStack(face: string): string {
 interface Settings {
   theme: Theme;
   viewMode: ViewMode;
+  // #87(3) — if set, this view mode is forced on every launch, overriding
+  // the persisted last-used `viewMode`. `null` (default) keeps the existing
+  // behavior of resuming whatever mode the user left in.
+  startupViewMode: ViewMode | null;
   fontSize: number;
   fontFamily: string;
   wordWrap: boolean;
   showLineNumbers: boolean;
+  // #193 — non-blinking (solid) caret in the editor.
+  solidCursor: boolean;
+  // #190 — dedicated code font (code blocks / inline code / mono UI).
+  // Empty = built-in monospace stack.
+  codeFontFamily: string;
   showOutline: boolean;
   outlineSide: 'left' | 'right';
+  // v4.6.2 — outline heading marker style. 'jump' = a/b/c… keyboard-jump labels
+  // (default; mixes letters + digits past 25 headings); 'number' = clean
+  // sequential 1/2/3…; 'none' = hidden.
+  outlineMarker: 'jump' | 'number' | 'none';
   showFileTree: boolean;
+  /** v4.3.x release marker: set on first launch after the default flipped
+   *  from `false` → `true` (desktop). If absent on load, `load()` force-enables
+   *  `showFileTree` once for desktop users so the flip actually reaches the
+   *  existing install base; mobile is left alone (file tree on a phone would
+   *  crowd the editor). After the migration the user is free to toggle it
+   *  off via the toolbar / ⌘B / command palette and the choice persists. */
+  fileTreeDefaultDesktopMigrated: boolean;
+  /** #143 (4.8.10) — one-time sync of a stale `previewFontSize`. The #133 fix
+   *  only synced preview size when the slider was MOVED again, so installs
+   *  whose `fontSize` predates 4.8.0 kept the old preview default (15) forever
+   *  — "font size doesn't apply to the preview". On first load after upgrade,
+   *  a previewFontSize still at the old default is aligned to fontSize once;
+   *  the ⌃⌘+/− preview-zoom axis can still diverge it afterwards. */
+  v4810PreviewFontSynced: boolean;
+  // #148 (mobile) — one-time: hide the right sidebar on phones so the editor
+  // isn't squeezed into an unreadable sliver.
+  v491MobileLayoutMigrated: boolean;
+  /** v4.6 F5 — show the Saved Views panel (left sidebar, below the file tree).
+   *  Lists persistent filtered note lists from `.solomd/views/*.yml`. Default
+   *  off so the panel only appears once the user opts in / creates a view. */
+  showViewsPanel: boolean;
   /** Master toggle that hides the right side sidebar (Outline / Backlinks /
    *  Tags / History / Agent Panel) without forgetting which individual panes
    *  the user had on. Default false (= sidebar visible whenever any pane is
@@ -49,6 +83,19 @@ interface Settings {
   autoCheckUpdate: boolean;
   // Preview layout
   previewFitWidth: boolean;
+  /** v4.10 issue #165 — preview/reading content column width in px (was a
+   *  hardcoded 760px). Clamped 480–1600; `previewFitWidth` still overrides
+   *  to full-bleed when on. */
+  previewMaxWidth: number;
+  /** v4.10 issue #163 — PlantUML fences render via a PlantUML server (the
+   *  diagram SOURCE is sent to it, so this is opt-in and off by default to
+   *  honor local-first; point `plantumlServer` at a self-hosted instance to
+   *  keep everything on your network). */
+  plantumlEnabled: boolean;
+  plantumlServer: string;
+  // #109 — constrain the editor pane to a centered readable column instead of
+  // letting long lines stretch the full window width.
+  limitEditorWidth: boolean;
   // Custom CSS theme override (path to a .css file on disk)
   customCssPath: string;
   // Anonymous telemetry (Aptabase). Defaults true but user can opt out.
@@ -57,18 +104,35 @@ interface Settings {
   telemetryNoticeAck: boolean;
   // Restore previously-open tabs + pane layout at startup (default: true).
   restoreSession: boolean;
+  // Scope open tabs to the active workspace folder (default: true). Each
+  // folder remembers its own tabs, so opening folder A never resurfaces
+  // folder B's accumulated tabs, and multiple windows on different folders
+  // don't clobber one shared tab blob. Unsaved + untitled tabs always follow
+  // the user across workspaces so no in-progress work is lost.
+  perWorkspaceTabs: boolean;
   // When a file watched by SoloMD is modified by another program (other
   // editor, git checkout, sync client), reload the buffer automatically
   // if the tab has no unsaved changes. Default on. Dirty tabs always
   // show the reload/overwrite/cancel dialog regardless of this setting —
   // we never silently throw away the user's in-progress edits.
   autoReloadExternalChanges: boolean;
+  // When the app window loses focus (user switches to another app/window),
+  // silently save every dirty tab that's already backed by a file. Untitled
+  // tabs are skipped — they'd otherwise pop a Save-As dialog on blur. Default
+  // off so the explicit-⌘S mental model stays the default.
+  autoSaveOnBlur: boolean;
   // Opening a file from the toolbar/menu spawns a new Tauri window instead
   // of a new tab in the current window. Default off.
   openFileInNewWindow: boolean;
   // After opening a file, point the file tree sidebar at its parent folder
   // (and reveal the sidebar if hidden). Default off.
   revealInFileTreeOnOpen: boolean;
+  // Clicking a Markdown link to a local NON-document file (e.g.
+  // `[x](./report.pdf)`) opens it with the OS default app (Typora/Obsidian
+  // style) instead of converting it to Markdown via markitdown. Applies to
+  // links only (file-tree double-click keeps converting). Default on — a
+  // link click reads as "open this file". Turn off to convert instead.
+  openLinkedFilesExternally: boolean;
   // First-launch welcome tour: opened automatically once. Don't reopen.
   welcomeShown: boolean;
   // v4.0 first-run agent setup wizard. Shown once after the welcome tour to
@@ -76,6 +140,8 @@ interface Settings {
   agentWizardSeen: boolean;
   // v2.0 F1: show the Backlinks panel (right of editor) for markdown docs.
   showBacklinks: boolean;
+  // v4.6 F3: show the Relationships panel (typed forward + inverse edges).
+  showRelationships: boolean;
   // v2.0 F2: CodeMirror Hunspell spell-check (separate from browser-native `spellCheck` above).
   spellcheckEnabled: boolean;
   // v2.0 F3: daily notes
@@ -83,6 +149,12 @@ interface Settings {
   dailyNotesFormat: string;
   dailyNotesTemplate: string;
   showTagsPanel: boolean;
+  // v4.6 F4: Neighborhood — per-note relationship explorer pane (frontmatter
+  // wikilink groups + inverse scan + body backlinks).
+  showNeighborhood: boolean;
+  // v4.6 F2: Types sidebar pane (types-as-lenses). Notes with `type:<Name>`
+  // grouped into collapsible first-class sidebar sections.
+  showTypesPanel: boolean;
   // v4.0 pillar 1: Inline Agent Panel — chat-with-vault sidebar.
   showAgentPanel: boolean;
   // v4.0 release migration marker: set on first launch after upgrading
@@ -102,6 +174,8 @@ interface Settings {
   // Backlinks / Tags / History / Agent Panel. The agent panel needs more
   // room than read-only browsing; user-resizable via the drag handle.
   sideSidebarWidth: number;
+  // Width (in px) of the left file tree sidebar. User-resizable via drag handle.
+  fileTreeWidth: number;
   // v2.0 F4: BYOK AI rewrite. `aiProvider` is a stable id from
   // ai-providers.ts PROVIDERS — widened to string to avoid breaking when
   // new providers land.
@@ -121,6 +195,9 @@ interface Settings {
    *  during conflict resolution). Defaults to true so existing AutoGit
    *  users see no behavior change. */
   showHistoryPanel: boolean;
+  /** v4.6 F1 — show the Properties inspector pane (frontmatter editor) in the
+   *  right sidebar. Toggled via ⌘⇧I / command palette. */
+  showInspector: boolean;
   /** v4.0.2 — per-pane heights in the right sidebar (issue #6 / #52 / #55).
    *  Map of pane id → flex-basis pixels. Panes without an entry use
    *  proportional flex grow (legacy behavior). Once the user drags a
@@ -165,6 +242,122 @@ interface Settings {
   // for a free MIT app), but explicitly toggleable in Settings → Export
   // for users who don't want the watermark on screenshots they share.
   imageExportBranding: boolean;
+  // v4.3.0: global UI zoom (scales the entire app — editor, preview, chrome,
+  // sidebars, modals). Helpful on high-DPI screens where everything renders
+  // too small even at the OS default scale. Range 0.75x – 2.5x. Wired via
+  // `document.documentElement.style.zoom`, which Chromium / WebKit / wry all
+  // support. Bound to ⌘=, ⌘-, ⌘0 shortcuts. Issue #72.
+  globalZoom: number;
+  // v4.3.0: show line numbers next to each line of code in the rendered
+  // preview (and Pandoc/PDF/PNG exports — they all share the preview HTML).
+  // Default off so existing exports don't surprise anyone. Issue #65.
+  codeBlockLineNumbers: boolean;
+  // #178: soft-wrap long lines inside fenced code blocks in the preview
+  // instead of a horizontal scrollbar. Default off (scroll preserves exact
+  // code layout); print/PDF always wraps regardless — paper can't scroll.
+  codeBlockWrap: boolean;
+  // #182: show full file names in the Explorer tree (wrapped across lines)
+  // instead of the default middle-ellipsis truncation.
+  explorerFullNames: boolean;
+  // #141 (4.8.10): render a single newline as a real line break (Typora-like)
+  // in preview / live editor / every export. Default ON — CJK users write
+  // one-sentence-per-line and expect it to hold; standard blank-line
+  // paragraphs render identically either way. OFF = strict CommonMark
+  // soft-break (newline collapses to a space).
+  markdownHardBreaks: boolean;
+  // Promote plain numbered-section lines (`6.2 出口许可证管理目录`,
+  // `6.2.1 …`) to headings whose level tracks the numbering depth. Off by
+  // default — the promotion is heuristic (a line opening with a decimal like
+  // `3.14 …` also matches), so CJK-report users opt in.
+  markdownAutoNumberHeadings: boolean;
+  // v4.3.0: user-customisable order of the right-sidebar panes. Each entry
+  // is a pane id (search / outline / backlinks / tags / history / agent).
+  // Default matches the pre-v4.3.0 hardcoded order. Panes not in the list
+  // (newly added in a future release) get appended to the end so the user's
+  // saved layout isn't blown away by a SoloMD update. Issue #57b.
+  rsPaneOrder: string[];
+  // v4.3.0: preview-pane font size (px). Decoupled from editor `fontSize`
+  // so users can tune editor density and preview readability separately
+  // (PR #74 — yzcj105). Bound to ⌃⌘+/⌃⌘-/⌃⌘0; the editor axis (existing
+  // `fontSize`) is bound to ⌘⇧+/⌘⇧-/⌘⇧0. Range 10–32.
+  previewFontSize: number;
+  /** v4.3.5 — where to write images pasted/dropped into the editor.
+   *  - `shared` (default): one `_assets/` folder per directory. All notes in
+   *    that dir share it. Matches pre-v4.3.5 behavior; safe for legacy vaults.
+   *  - `per-file`: each note gets its own `<basename>.assets/` folder next to
+   *    the .md. Moving / renaming the note moves the folder with it
+   *    (handled in `fs_rename` on the Rust side, which also rewrites
+   *    `<oldStem>.assets/...` link refs inside the file body when the stem
+   *    changes). Better when notes get reshuffled often; clutters the file
+   *    tree if every note has images. Issue: user feedback 2026-05-26.
+   */
+  attachmentMode: 'shared' | 'per-file' | 'custom';
+  // #7 (顾河) — Typora-style custom path template for `custom` attachment mode.
+  // Supports `${filename}` (the note's name without extension). Relative
+  // templates (`./images/${filename}/`, `assets/`) resolve against the note's
+  // folder; an absolute path is used as-is. Default mirrors Typora's default.
+  attachmentCustomPath: string;
+  // #88 — folder name for `shared` attachment mode (default `_assets`). Used
+  // only when attachmentMode is 'shared'; per-file mode always uses
+  // `<stem>.assets/`. Empty string falls back to `_assets`.
+  assetsDirName: string;
+  // ── Image upload / 图床 (external image hosting) ───────────────────────────
+  // Like Typora / MarkText: instead of (or alongside) copying a pasted/dropped
+  // image into the local attachments folder, upload it to an image host and
+  // insert the returned URL. `none` = current local-only behavior. The actual
+  // upload runs in the Rust `upload_image` command; the per-backend fields below
+  // are forwarded to it. See `lib/image-upload.ts` for the config builder.
+  imageUploader: 'none' | 'picgo' | 'command' | 'smms' | 's3' | 'github';
+  // Auto-upload pasted/dropped images. When false, images still save locally and
+  // the user uploads later via the command palette ("Upload local images…").
+  imageUploadOnPaste: boolean;
+  // Keep a local copy in the attachments folder too (link still points at the
+  // uploaded URL). When false, only a temp copy is made for the upload.
+  imageUploadKeepLocal: boolean;
+  // PicGo app's built-in HTTP server endpoint.
+  picgoEndpoint: string;
+  // Custom uploader command template; `{path}` is replaced with the image file.
+  imageUploadCommand: string;
+  // SM.MS API token (optional; empty = anonymous upload).
+  smmsToken: string;
+  // S3-compatible (AWS S3 / Aliyun OSS / Tencent COS / Cloudflare R2 / MinIO).
+  s3Endpoint: string;
+  s3Region: string;
+  s3Bucket: string;
+  s3AccessKeyId: string;
+  s3SecretAccessKey: string;
+  s3PathPrefix: string;
+  s3CustomDomain: string;
+  s3UsePathStyle: boolean;
+  // GitHub repo as an image host (served via raw.githubusercontent or jsDelivr).
+  ghImageRepo: string;
+  ghImageBranch: string;
+  ghImageToken: string;
+  ghImagePathPrefix: string;
+  ghImageCdn: 'raw' | 'jsdelivr';
+  // v4.6 F6 — Inbox workflow. Master opt-out for the whole inbox surface
+  // (file-tree row, status-bar pill, dedicated InboxView, ⌘E auto-advance).
+  // Default on — mirrors Tolaria's per-vault InboxConfig.explicitOrganization,
+  // but stored locally (not in files). When off, ⌘E falls back to the plain
+  // `inbox: true|false` toggle and the InboxView / inbox filter are hidden.
+  inboxWorkflowEnabled: boolean;
+  // v4.6 F6 — when on, marking a note organized (⌘E) inside the inbox context
+  // (InboxView open or inbox filter active) auto-advances to the next inbox
+  // note. Default on. Matches Tolaria's auto_advance_inbox_after_organize.
+  autoAdvanceInboxAfterOrganize: boolean;
+  // v4.3.0 PR #75 (beihai23) — transient (not persisted) snapshot of the
+  // right-sidebar pane visibility taken when the sidebar is hidden, so
+  // toggling it back on can restore the exact previous layout instead of
+  // leaving the user with a blank sidebar.
+  _rsPanesBeforeHide: {
+    showBacklinks: boolean;
+    showRelationships: boolean;
+    showTagsPanel: boolean;
+    showNeighborhood: boolean;
+    showTypesPanel: boolean;
+    showHistoryPanel: boolean;
+    showAgentPanel: boolean;
+  } | null;
 }
 
 /** v2.5 PDF / print export defaults. */
@@ -217,14 +410,28 @@ function defaults(): Settings {
   return {
     theme: prefersDark ? 'dark' : 'light',
     viewMode: 'edit',
+    startupViewMode: null,
     fontSize: 14,
     fontFamily: 'JetBrains Mono',
     wordWrap: true,
     showLineNumbers: true,
+    solidCursor: false,
+    codeFontFamily: '',
     showOutline: false,
     outlineSide: 'right',
-    showFileTree: false,
-    rightSidebarHidden: false,
+    outlineMarker: 'jump',
+    showFileTree: !isMobile(),
+    // Fresh installs already see the new default — mark migration done so
+    // load()'s one-time force-on path is a no-op for them.
+    fileTreeDefaultDesktopMigrated: true,
+    v4810PreviewFontSynced: true,
+    v491MobileLayoutMigrated: true,
+    showViewsPanel: false,
+    // #148 (mobile) — on a phone the left tree + editor + right panels can't
+    // share the narrow width (the doc becomes an unreadable sliver), so the
+    // right sidebar starts hidden. The editor + file tree behave as mutually
+    // exclusive full-width views (opening a file collapses the tree).
+    rightSidebarHidden: isMobile(),
     livePreview: true,
     spellCheck: true,
     focusMode: false,
@@ -254,21 +461,31 @@ function defaults(): Settings {
       } catch { return 'en'; }
     })() as 'en' | 'zh' | 'ja' | 'ko' | 'de' | 'fr' | 'es' | 'pt' | 'it' | 'pl' | 'nl' | 'tr' | 'sv' | 'uk',
     previewFitWidth: false,
+    previewMaxWidth: 760,
+    plantumlEnabled: false,
+    plantumlServer: 'https://www.plantuml.com/plantuml',
+    limitEditorWidth: false,
     customCssPath: '',
     telemetryEnabled: true,
     telemetryNoticeAck: false,
     restoreSession: true,
+    perWorkspaceTabs: true,
     autoReloadExternalChanges: true,
+    autoSaveOnBlur: false,
     openFileInNewWindow: false,
     revealInFileTreeOnOpen: false,
+    openLinkedFilesExternally: true,
     welcomeShown: false,
     agentWizardSeen: false,
     showBacklinks: true,
+    showRelationships: false,
     spellcheckEnabled: false,
     dailyNotesFolder: 'Daily',
     dailyNotesFormat: 'YYYY-MM-DD.md',
     dailyNotesTemplate: '',
     showTagsPanel: true,
+    showNeighborhood: false,
+    showTypesPanel: false,
     showAgentPanel: true,
     // True for fresh installs (defaults are already v4.0). Existing
     // localStorage blobs from v3.6.x / v4-beta won't have this key, so
@@ -278,6 +495,7 @@ function defaults(): Settings {
     agentAllowWrite: false,
     agentToolLoopCap: 8,
     sideSidebarWidth: 260,
+    fileTreeWidth: 240,
     aiEnabled: false,
     aiProvider: 'openai',
     aiModel: '',
@@ -287,6 +505,7 @@ function defaults(): Settings {
     autoGitEnabled: false,
     autoGitDebounceSeconds: 30,
     showHistoryPanel: true,
+    showInspector: false,
     rightSidebarPaneHeights: {},
     ragEnabled: false,
     readingByDefaultOnMobile: (() => {
@@ -305,6 +524,39 @@ function defaults(): Settings {
     pomodoroDefaultMinutes: 25,
     slashCommandsEnabled: true,
     imageExportBranding: true,
+    globalZoom: 1,
+    codeBlockLineNumbers: false,
+    codeBlockWrap: false,
+    explorerFullNames: false,
+    markdownHardBreaks: true,
+    markdownAutoNumberHeadings: false,
+    rsPaneOrder: ['search', 'outline', 'backlinks', 'relationships', 'tags', 'neighborhood', 'types', 'history', 'inspector', 'agent'],
+    previewFontSize: 15,
+    attachmentMode: 'shared',
+    assetsDirName: '_assets',
+    attachmentCustomPath: './images/${filename}/',
+    imageUploader: 'none',
+    imageUploadOnPaste: true,
+    imageUploadKeepLocal: false,
+    picgoEndpoint: 'http://127.0.0.1:36677/upload',
+    imageUploadCommand: '',
+    smmsToken: '',
+    s3Endpoint: '',
+    s3Region: 'us-east-1',
+    s3Bucket: '',
+    s3AccessKeyId: '',
+    s3SecretAccessKey: '',
+    s3PathPrefix: 'images/',
+    s3CustomDomain: '',
+    s3UsePathStyle: false,
+    ghImageRepo: '',
+    ghImageBranch: 'main',
+    ghImageToken: '',
+    ghImagePathPrefix: 'images/',
+    ghImageCdn: 'jsdelivr',
+    inboxWorkflowEnabled: true,
+    autoAdvanceInboxAfterOrganize: true,
+    _rsPanesBeforeHide: null,
   };
 }
 
@@ -360,6 +612,32 @@ function load(): Settings {
         merged.showAgentPanel = true;
         merged.v4AgentPanelMigrated = true;
       }
+      // v4.3.x — file tree default flipped to "on" for desktop. Existing
+      // installs (where the saved blob has the key as `false`) get the
+      // sidebar opened once on next launch; mobile is skipped so phones
+      // keep the editor full-width. Marker prevents re-applying after the
+      // user explicitly closes it.
+      if (!parsed.fileTreeDefaultDesktopMigrated) {
+        if (!isMobile()) merged.showFileTree = true;
+        merged.fileTreeDefaultDesktopMigrated = true;
+      }
+      // #143 — align a stale preview font size (see v4810PreviewFontSynced doc).
+      // Only when the user actually customized the editor size (≠ the 14
+      // default) while the preview is still at its own old default (15) —
+      // untouched installs keep their 14/15 pair unchanged.
+      if (!parsed.v4810PreviewFontSynced) {
+        if ((parsed.previewFontSize ?? 15) === 15 && merged.fontSize !== 14) {
+          merged.previewFontSize = Math.max(10, Math.min(32, merged.fontSize));
+        }
+        merged.v4810PreviewFontSynced = true;
+      }
+      // #148 (mobile) — one-time: existing phone installs had the right sidebar
+      // on, squeezing the editor. Hide it once; desktop untouched. User can
+      // re-open it and that choice persists.
+      if (!parsed.v491MobileLayoutMigrated) {
+        if (isMobile()) merged.rightSidebarHidden = true;
+        merged.v491MobileLayoutMigrated = true;
+      }
       return merged;
     }
   } catch {}
@@ -371,7 +649,11 @@ export const useSettingsStore = defineStore('settings', {
   actions: {
     persist() {
       try {
-        localStorage.setItem(LS_KEY, JSON.stringify(this.$state));
+        // v4.3.0 PR #75 — drop transient `_rsPanesBeforeHide` from disk;
+        // it's only meaningful for the current session.
+        const { _rsPanesBeforeHide, ...rest } = this.$state as any;
+        void _rsPanesBeforeHide;
+        localStorage.setItem(LS_KEY, JSON.stringify(rest));
       } catch {}
     },
     setTheme(theme: Theme) {
@@ -380,6 +662,10 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleTheme() {
       this.setTheme(this.theme === 'light' ? 'dark' : 'light');
+    },
+    setStartupViewMode(mode: ViewMode | null) {
+      this.startupViewMode = mode;
+      this.persist();
     },
     setViewMode(mode: ViewMode) {
       // Remember whatever non-reading mode we were in before — the
@@ -430,6 +716,12 @@ export const useSettingsStore = defineStore('settings', {
     },
     setFontSize(n: number) {
       this.fontSize = Math.max(10, Math.min(28, n));
+      // #133 — the Settings "字号 / Font size" slider is the single base size
+      // users expect to govern every view. Keep the preview pane in lockstep so
+      // changing it visibly resizes the rendered side too (split panes then
+      // match). The ⌃⌘+/− preview-zoom axis can still nudge previewFontSize on
+      // its own afterwards for users who want the panes to differ.
+      this.previewFontSize = Math.max(10, Math.min(32, this.fontSize));
       this.persist();
     },
     setFontFamily(f: string) {
@@ -440,8 +732,28 @@ export const useSettingsStore = defineStore('settings', {
       this.wordWrap = !this.wordWrap;
       this.persist();
     },
+    setPreviewMaxWidth(n: number) {
+      this.previewMaxWidth = Math.max(480, Math.min(1600, Math.round(n)));
+      this.persist();
+    },
+    togglePlantuml() {
+      this.plantumlEnabled = !this.plantumlEnabled;
+      this.persist();
+    },
+    setPlantumlServer(s: string) {
+      this.plantumlServer = s.trim();
+      this.persist();
+    },
     toggleLineNumbers() {
       this.showLineNumbers = !this.showLineNumbers;
+      this.persist();
+    },
+    toggleSolidCursor() {
+      this.solidCursor = !this.solidCursor;
+      this.persist();
+    },
+    setCodeFontFamily(f: string) {
+      this.codeFontFamily = f;
       this.persist();
     },
     toggleOutline() {
@@ -452,13 +764,77 @@ export const useSettingsStore = defineStore('settings', {
       this.outlineSide = side;
       this.persist();
     },
+    setOutlineMarker(marker: 'jump' | 'number' | 'none') {
+      this.outlineMarker = marker;
+      this.persist();
+    },
     toggleFileTree() {
       this.showFileTree = !this.showFileTree;
       this.persist();
     },
-    toggleRightSidebar() {
-      this.rightSidebarHidden = !this.rightSidebarHidden;
+    toggleViewsPanel() {
+      this.showViewsPanel = !this.showViewsPanel;
       this.persist();
+    },
+    toggleRightSidebar() {
+      // v4.3.0 PR #75 — when hiding, snapshot the current pane visibility so
+      // toggling back on can restore the exact layout instead of a blank
+      // sidebar; when restoring, ensure at least one pane is on so the
+      // sidebar isn't empty.
+      if (!this.rightSidebarHidden) {
+        this._rsPanesBeforeHide = {
+          showBacklinks: this.showBacklinks,
+          showRelationships: this.showRelationships,
+          showTagsPanel: this.showTagsPanel,
+          showNeighborhood: this.showNeighborhood,
+          showTypesPanel: this.showTypesPanel,
+          showHistoryPanel: this.showHistoryPanel,
+          showAgentPanel: this.showAgentPanel,
+        };
+        this.rightSidebarHidden = true;
+      } else {
+        this.rightSidebarHidden = false;
+        const saved = this._rsPanesBeforeHide;
+        if (saved) {
+          this.showBacklinks = saved.showBacklinks;
+          this.showRelationships = saved.showRelationships;
+          this.showTagsPanel = saved.showTagsPanel;
+          this.showNeighborhood = saved.showNeighborhood;
+          this.showTypesPanel = saved.showTypesPanel;
+          this.showHistoryPanel = saved.showHistoryPanel;
+          this.showAgentPanel = saved.showAgentPanel;
+          this._rsPanesBeforeHide = null;
+        }
+        if (!this.showBacklinks && !this.showRelationships && !this.showTagsPanel && !this.showTypesPanel && !this.showNeighborhood && !this.showHistoryPanel && !this.showAgentPanel) {
+          this.showBacklinks = true;
+          this.showTagsPanel = true;
+        }
+      }
+      this.persist();
+    },
+    /** v4.3.0 PR #75 — called when the user toggles off the last visible
+     *  pane via the right-click context menu; auto-hides the sidebar and
+     *  remembers the pre-toggle layout for later restore. */
+    hideRightSidebarFromPane(paneBeforeToggle: {
+      showBacklinks: boolean;
+      showRelationships: boolean;
+      showTagsPanel: boolean;
+      showNeighborhood: boolean;
+      showTypesPanel: boolean;
+      showHistoryPanel: boolean;
+      showAgentPanel: boolean;
+    }) {
+      this._rsPanesBeforeHide = paneBeforeToggle;
+      this.rightSidebarHidden = true;
+      this.persist();
+    },
+    /** v4.3.0 PR #75 — ensure the sidebar is visible (used when toggling a
+     *  pane ON from the context menu while the sidebar was auto-hidden). */
+    ensureRightSidebarVisible() {
+      if (this.rightSidebarHidden) {
+        this.rightSidebarHidden = false;
+        this.persist();
+      }
     },
     toggleLivePreview() {
       this.livePreview = !this.livePreview;
@@ -496,8 +872,16 @@ export const useSettingsStore = defineStore('settings', {
       this.restoreSession = !this.restoreSession;
       this.persist();
     },
+    togglePerWorkspaceTabs() {
+      this.perWorkspaceTabs = !this.perWorkspaceTabs;
+      this.persist();
+    },
     toggleAutoReloadExternalChanges() {
       this.autoReloadExternalChanges = !this.autoReloadExternalChanges;
+      this.persist();
+    },
+    toggleAutoSaveOnBlur() {
+      this.autoSaveOnBlur = !this.autoSaveOnBlur;
       this.persist();
     },
     toggleOpenFileInNewWindow() {
@@ -506,6 +890,10 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleRevealInFileTreeOnOpen() {
       this.revealInFileTreeOnOpen = !this.revealInFileTreeOnOpen;
+      this.persist();
+    },
+    toggleOpenLinkedFilesExternally() {
+      this.openLinkedFilesExternally = !this.openLinkedFilesExternally;
       this.persist();
     },
     markWelcomeShown() {
@@ -522,6 +910,12 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleBacklinks() {
       this.showBacklinks = !this.showBacklinks;
+      if (this.showBacklinks) this.ensureRightSidebarVisible();
+      this.persist();
+    },
+    toggleRelationships() {
+      this.showRelationships = !this.showRelationships;
+      if (this.showRelationships) this.ensureRightSidebarVisible();
       this.persist();
     },
     toggleSpellcheckEnabled() {
@@ -530,10 +924,23 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleTagsPanel() {
       this.showTagsPanel = !this.showTagsPanel;
+      if (this.showTagsPanel) this.ensureRightSidebarVisible();
+      this.persist();
+    },
+    toggleNeighborhood() {
+      this.showNeighborhood = !this.showNeighborhood;
+      if (this.showNeighborhood) this.ensureRightSidebarVisible();
+      this.persist();
+    },
+    // v4.6 F2 — toggle the Types (types-as-lenses) sidebar pane.
+    toggleTypesPanel() {
+      this.showTypesPanel = !this.showTypesPanel;
+      if (this.showTypesPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
     toggleAgentPanel() {
       this.showAgentPanel = !this.showAgentPanel;
+      if (this.showAgentPanel) this.ensureRightSidebarVisible();
       this.persist();
     },
     toggleAgentAllowWrite() {
@@ -550,6 +957,13 @@ export const useSettingsStore = defineStore('settings', {
       // eats too much editor space.
       const clean = Math.max(220, Math.min(800, Math.round(w) || 260));
       this.sideSidebarWidth = clean;
+      this.persist();
+    },
+    setFileTreeWidth(w: number) {
+      // Reasonable bounds — narrower than 180 hides text, wider than 600
+      // eats too much editor space.
+      const clean = Math.max(180, Math.min(600, Math.round(w) || 240));
+      this.fileTreeWidth = clean;
       this.persist();
     },
     setDailyNotesFolder(p: string) {
@@ -598,6 +1012,13 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleHistoryPanel() {
       this.showHistoryPanel = !this.showHistoryPanel;
+      if (this.showHistoryPanel) this.ensureRightSidebarVisible();
+      this.persist();
+    },
+    /** v4.6 F1 — toggle the Properties inspector pane (⌘⇧I). */
+    toggleInspector() {
+      this.showInspector = !this.showInspector;
+      if (this.showInspector) this.ensureRightSidebarVisible();
       this.persist();
     },
     setRightSidebarPaneHeight(paneId: string, px: number) {
@@ -630,6 +1051,10 @@ export const useSettingsStore = defineStore('settings', {
     },
     togglePreviewFitWidth() {
       this.previewFitWidth = !this.previewFitWidth;
+      this.persist();
+    },
+    toggleLimitEditorWidth() {
+      this.limitEditorWidth = !this.limitEditorWidth;
       this.persist();
     },
     toggleRagEnabled() {
@@ -676,6 +1101,148 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleImageExportBranding() {
       this.imageExportBranding = !this.imageExportBranding;
+      this.persist();
+    },
+    setGlobalZoom(n: number) {
+      // Clamp to a sane range: 0.75 (text uncomfortably small) to 2.5 (text
+      // huge for accessibility / 8K screens). Round to 0.05 so the slider
+      // / shortcuts don't accumulate floating-point drift.
+      const clean = Math.max(0.75, Math.min(2.5, Math.round((n || 1) * 20) / 20));
+      this.globalZoom = clean;
+      this.persist();
+    },
+    zoomIn() {
+      this.setGlobalZoom((this.globalZoom || 1) + 0.1);
+    },
+    zoomOut() {
+      this.setGlobalZoom((this.globalZoom || 1) - 0.1);
+    },
+    resetZoom() {
+      this.setGlobalZoom(1);
+    },
+    toggleCodeBlockLineNumbers() {
+      this.codeBlockLineNumbers = !this.codeBlockLineNumbers;
+      this.persist();
+    },
+    toggleCodeBlockWrap() {
+      this.codeBlockWrap = !this.codeBlockWrap;
+      this.persist();
+    },
+    toggleExplorerFullNames() {
+      this.explorerFullNames = !this.explorerFullNames;
+      this.persist();
+    },
+    toggleMarkdownHardBreaks() {
+      this.markdownHardBreaks = !this.markdownHardBreaks;
+      this.persist();
+    },
+    toggleMarkdownAutoNumberHeadings() {
+      this.markdownAutoNumberHeadings = !this.markdownAutoNumberHeadings;
+      this.persist();
+    },
+    /** v4.3.0 issue #57b — reorder the right sidebar by moving a pane id to
+     *  a new index. Tolerates out-of-range targets (clamps), no-ops for
+     *  unknown ids. */
+    moveRsPane(paneId: string, targetIdx: number) {
+      const order = [...(this.rsPaneOrder || [])];
+      const from = order.indexOf(paneId);
+      if (from < 0) return;
+      const [item] = order.splice(from, 1);
+      const clamped = Math.max(0, Math.min(order.length, targetIdx));
+      order.splice(clamped, 0, item);
+      this.rsPaneOrder = order;
+      this.persist();
+    },
+    resetRsPaneOrder() {
+      this.rsPaneOrder = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'neighborhood', 'types', 'history', 'inspector', 'agent'];
+      this.persist();
+    },
+    /** v4.3.0 PR #74 — preview-only font size. Editor font is the existing
+     *  `setFontSize`; this one drives `--content-font-size` (Preview.vue). */
+    setPreviewFontSize(n: number) {
+      this.previewFontSize = Math.max(10, Math.min(32, Math.round(n || 15)));
+      this.persist();
+    },
+    previewFontIn() { this.setPreviewFontSize((this.previewFontSize || 15) + 1); },
+    previewFontOut() { this.setPreviewFontSize((this.previewFontSize || 15) - 1); },
+    resetPreviewFontSize() { this.setPreviewFontSize(15); },
+    /** v4.3.5 — flip between `shared` (`_assets/`) and `per-file`
+     *  (`<basename>.assets/`) attachment storage layouts. */
+    setAttachmentMode(mode: 'shared' | 'per-file' | 'custom') {
+      this.attachmentMode =
+        mode === 'per-file' ? 'per-file' : mode === 'custom' ? 'custom' : 'shared';
+      this.persist();
+    },
+    // #7 — Typora-style custom path template (used when attachmentMode==='custom').
+    setAttachmentCustomPath(tpl: string) {
+      const cleaned = (tpl || '').trim();
+      this.attachmentCustomPath = cleaned || './images/${filename}/';
+      this.persist();
+    },
+    setAssetsDirName(name: string) {
+      // Strip slashes/backslashes — the path is joined by the image-paste
+      // helper using the platform separator, so a name with separators would
+      // create nested folders or break URL prefixes. Trim whitespace; fall
+      // back to the default when empty.
+      const cleaned = (name || '').replace(/[\\/]/g, '').trim();
+      this.assetsDirName = cleaned || '_assets';
+      this.persist();
+    },
+    /** Image-upload / 图床 config. One generic patch action — the Settings
+     *  panel binds each field through it. Only whitelisted keys are accepted so
+     *  a stray key can't pollute the persisted blob. */
+    setImageUpload(
+      patch: Partial<
+        Pick<
+          Settings,
+          | 'imageUploader'
+          | 'imageUploadOnPaste'
+          | 'imageUploadKeepLocal'
+          | 'picgoEndpoint'
+          | 'imageUploadCommand'
+          | 'smmsToken'
+          | 's3Endpoint'
+          | 's3Region'
+          | 's3Bucket'
+          | 's3AccessKeyId'
+          | 's3SecretAccessKey'
+          | 's3PathPrefix'
+          | 's3CustomDomain'
+          | 's3UsePathStyle'
+          | 'ghImageRepo'
+          | 'ghImageBranch'
+          | 'ghImageToken'
+          | 'ghImagePathPrefix'
+          | 'ghImageCdn'
+        >
+      >,
+    ) {
+      const keys: (keyof Settings)[] = [
+        'imageUploader', 'imageUploadOnPaste', 'imageUploadKeepLocal',
+        'picgoEndpoint', 'imageUploadCommand', 'smmsToken',
+        's3Endpoint', 's3Region', 's3Bucket', 's3AccessKeyId',
+        's3SecretAccessKey', 's3PathPrefix', 's3CustomDomain', 's3UsePathStyle',
+        'ghImageRepo', 'ghImageBranch', 'ghImageToken', 'ghImagePathPrefix', 'ghImageCdn',
+      ];
+      for (const k of keys) {
+        if (k in patch && (patch as any)[k] !== undefined) {
+          (this as any)[k] = (patch as any)[k];
+        }
+      }
+      this.persist();
+    },
+    /** v4.3.0 PR #74 — editor-only font size convenience wrappers. The
+     *  underlying field is the existing `fontSize`. */
+    editorFontIn() { this.setFontSize((this.fontSize || 14) + 1); },
+    editorFontOut() { this.setFontSize((this.fontSize || 14) - 1); },
+    resetEditorFontSize() { this.setFontSize(14); },
+    // v4.6 F6 — Inbox workflow toggles.
+    toggleInboxWorkflow() {
+      this.inboxWorkflowEnabled = !this.inboxWorkflowEnabled;
+      this.persist();
+    },
+    toggleAutoAdvanceInbox() {
+      this.autoAdvanceInboxAfterOrganize = !this.autoAdvanceInboxAfterOrganize;
       this.persist();
     },
   },

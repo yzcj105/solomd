@@ -2,8 +2,27 @@
 import Layout from '../../layouts/Layout.astro';
 import Header from '../../components/Header.astro';
 import Footer from '../../components/Footer.astro';
+import CompareFaq from '../../components/CompareFaq.astro';
 
 const lang = 'en' as const;
+const FAQ = [
+  {
+    q: 'Is SoloMD really free, or is there a catch?',
+    a: 'SoloMD is $0 forever: MIT-licensed open source, no paid tier, no subscription, no in-app purchases, no ads, and zero telemetry by default. Typora costs $14.99 after a 15-day trial. The source is public at github.com/zhitongblog/solomd.',
+  },
+  {
+    q: 'Does SoloMD have the same live preview (WYSIWYG) as Typora?',
+    a: 'Yes. SoloMD ships a Typora-style live preview: Markdown markers fade when the cursor leaves a line and headings render at their real size while you type. It also offers source, split, and reading modes. On Windows, the live editor runs on native textarea blocks, which keeps Chinese/Japanese/Korean IME input reliable.',
+  },
+  {
+    q: 'Can I use SoloMD on my phone?',
+    a: 'Yes — SoloMD has native iOS and Android apps in addition to macOS, Windows, and Linux. Typora is desktop-only.',
+  },
+  {
+    q: 'What does SoloMD have that Typora does not?',
+    a: 'Built-in AI with 14 bring-your-own-key providers, local on-device semantic search (RAG), AutoGit version history on every save, a bundled MCP server for Claude Desktop / Cursor, tldraw whiteboards, typed note relationships with a per-note graph, and mobile apps. Typora’s edge is the polish of its single-mode WYSIWYG experience.',
+  },
+];
 ---
 
 <Layout
@@ -20,7 +39,7 @@ const lang = 'en' as const;
 
       <h1>SoloMD vs Typora: Which Markdown Editor Should You Use?</h1>
       <p class="lead">
-        Refreshed against <strong>SoloMD v4.0</strong> and <strong>Typora 1.13</strong> (May 2026).
+        Refreshed against <strong>SoloMD v4.11</strong> and <strong>Typora 1.13</strong> (mid-2026).
         Quick answer: <strong>SoloMD</strong> if you want an open-source editor where AI agents
         live as a first-class surface — chat-with-vault panel, scheduled recipes, replayable
         traces — all under an AutoGit branch sandbox so writes are reviewable.
@@ -31,7 +50,7 @@ const lang = 'en' as const;
       <h2>The 30-second verdict</h2>
       <table class="compare-detail">
         <thead>
-          <tr><th>&nbsp;</th><th>SoloMD v4.0</th><th>Typora 1.13</th></tr>
+          <tr><th>&nbsp;</th><th>SoloMD v4.11</th><th>Typora 1.13</th></tr>
         </thead>
         <tbody>
           <tr><th>Price</th><td><strong>Free</strong> (MIT)</td><td>$14.99 USD (one-time, 3 devices)</td></tr>
@@ -65,7 +84,7 @@ const lang = 'en' as const;
           <tr><th>Math (KaTeX vs MathJax v4)</th><td>KaTeX ~280 KB</td><td>✅ <strong>MathJax v4</strong> · richer (line-break <code>\\</code>, more TeX packages)</td></tr>
           <tr><th>Mermaid version</th><td>✅ <strong>11.14</strong> (newer)</td><td>11.13 (Venn + Ishikawa just added)</td></tr>
           <tr><th>Export PDF / DOCX / HTML / PNG</th><td>✅</td><td>✅</td></tr>
-          <tr><th>Pandoc export (EPUB / ODT / LaTeX)</th><td>✅</td><td>❌</td></tr>
+          <tr><th>Pandoc export (EPUB / ODT / LaTeX)</th><td>🟡 yes — needs Pandoc on PATH</td><td>🟡 yes — needs Pandoc on PATH</td></tr>
           <tr><th>Multi-encoding (GBK / Big5 / Shift-JIS)</th><td>✅ auto-detect (chardetng)</td><td>⚠️ UTF-8 only</td></tr>
           <tr><th>CJK proofread (中文标点)</th><td>✅ <strong>v2.5</strong></td><td>❌</td></tr>
           <tr><th>Vim mode</th><td>✅</td><td>❌</td></tr>
@@ -137,6 +156,37 @@ const lang = 'en' as const;
         <li>Encoding auto-detection for legacy Chinese/Japanese files</li>
       </ul>
 
+      <h2>Typora's own most-requested features — shipped in SoloMD</h2>
+      <p>
+        These are among the highest-upvoted, still-open requests on Typora's own
+        public tracker (<a href="https://github.com/typora/typora-issues/issues" rel="external">typora/typora-issues</a>),
+        some open since 2016–2018. SoloMD already ships every one of them — free
+        and on every platform:
+      </p>
+      <table class="compare-detail">
+        <thead>
+          <tr><th>Long-requested on Typora's tracker</th><th>SoloMD</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Multi-tab on Windows / Linux (open since 2017)</td><td>✅ tabs on every platform</td></tr>
+          <tr><td>Open in same tab / new tab / new window</td><td>✅ configurable</td></tr>
+          <tr><td>Source-control integration</td><td>✅ built-in AutoGit (per-note history, diff, rollback) + GitHub sync</td></tr>
+          <tr><td>Wiki-style <code>[[links]]</code></td><td>✅ wikilinks + backlinks panel</td></tr>
+          <tr><td>Presentation / slideshow mode</td><td>✅ full reveal.js (<code>⌘⌥P</code>)</td></tr>
+          <tr><td>Academic referencing / citations</td><td>✅ <code>@citekey</code> + .bib / CSL</td></tr>
+          <tr><td>Vim bindings</td><td>✅ Vim mode</td></tr>
+          <tr><td>More diagram formats</td><td>✅ Mermaid 11.14 (+ KaTeX)</td></tr>
+          <tr><td>Plugin / extensibility</td><td>✅ MCP endpoint + scriptable CLI + agent recipes (any LLM client can drive your vault)</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:0.95rem;color:var(--text-muted);">
+        Your existing Typora notes open unchanged: SoloMD reads Typora's
+        <code>./images/&lt;note&gt;/</code> attachment layout (set it in Settings →
+        Writing → Attachment mode) and renders images even under Chinese / spaced
+        folder names. Nothing is converted or locked in — they stay plain
+        <code>.md</code> in your folder.
+      </p>
+
       <h2>Both editors do well</h2>
       <ul>
         <li>KaTeX math (inline <code>$a^2+b^2=c^2$</code> and block <code>$$...$$</code>)</li>
@@ -184,6 +234,8 @@ const lang = 'en' as const;
       <h3>Does SoloMD support Typora themes?</h3>
       <p>Not out-of-the-box (different CSS selectors), but you can paste any CSS file
         via Settings → Custom CSS and override most styles.</p>
+
+      <CompareFaq heading="Frequently asked questions" items={FAQ} />
 
       <div class="compare-cta">
         <a href="/#download" class="btn btn--primary">Download SoloMD</a>

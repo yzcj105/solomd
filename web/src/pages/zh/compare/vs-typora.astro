@@ -2,8 +2,27 @@
 import Layout from '../../../layouts/Layout.astro';
 import Header from '../../../components/Header.astro';
 import Footer from '../../../components/Footer.astro';
+import CompareFaq from '../../../components/CompareFaq.astro';
 
 const lang = 'zh' as const;
+const FAQ = [
+  {
+    q: 'SoloMD 真的免费吗?有没有隐藏收费?',
+    a: 'SoloMD 永久 $0:MIT 开源、无付费版、无订阅、无内购、无广告,默认零遥测。Typora 15 天试用后收费 $14.99。源码公开在 github.com/zhitongblog/solomd。',
+  },
+  {
+    q: 'SoloMD 有和 Typora 一样的实时预览(所见即所得)吗?',
+    a: '有。SoloMD 的实时编辑是 Typora 式的:光标离开当前行后 Markdown 标记淡出,标题按实际大小渲染。另外还有源码、分栏、阅读三种视图。Windows 上实时编辑跑在原生 textarea 块上,中文输入法(搜狗等)输入稳定。',
+  },
+  {
+    q: '手机上能用 SoloMD 吗?',
+    a: '能 —— SoloMD 有原生 iOS 和 Android 应用,加上 macOS、Windows、Linux 共 5 个平台。Typora 只有桌面端。',
+  },
+  {
+    q: 'SoloMD 有哪些 Typora 没有的功能?',
+    a: '内置 AI(14 个自带 Key 的提供商)、本地语义搜索(RAG)、每次保存自动 Git 快照的版本历史、给 Claude Desktop / Cursor 用的 MCP 服务器、tldraw 白板、带关系图的类型化笔记关系,以及手机端。Typora 的优势是单一 WYSIWYG 模式的打磨程度。',
+  },
+];
 ---
 
 <Layout
@@ -20,7 +39,7 @@ const lang = 'zh' as const;
 
       <h1>SoloMD vs Typora：选哪个？</h1>
       <p class="lead">
-        对比基于 <strong>SoloMD v4.0</strong> 与 <strong>Typora 1.13</strong>（2026 年 5 月）。
+        对比基于 <strong>SoloMD v4.11</strong> 与 <strong>Typora 1.13</strong>（2026 年中）。
         想要一个开源编辑器、Agent 是一等公民（chat-with-vault 面板、定时 recipe、AutoGit
         分支沙箱使写入可审），SoloMD；想要最完整的<strong>单一 WYSIWYG</strong>
         体验、不需要 AI / 同步 / 版本历史 / agent 在核心，Typora 仍是好选择。
@@ -29,7 +48,7 @@ const lang = 'zh' as const;
       <h2>30 秒速览</h2>
       <table class="compare-detail">
         <thead>
-          <tr><th>&nbsp;</th><th>SoloMD v4.0</th><th>Typora 1.13</th></tr>
+          <tr><th>&nbsp;</th><th>SoloMD v4.11</th><th>Typora 1.13</th></tr>
         </thead>
         <tbody>
           <tr><th>价格</th><td><strong>免费</strong>（MIT）</td><td>$14.99 美元（买断，3 设备）</td></tr>
@@ -62,7 +81,7 @@ const lang = 'zh' as const;
           <tr><th>数学（KaTeX vs MathJax v4）</th><td>KaTeX ~280 KB</td><td>✅ <strong>MathJax v4</strong> · 更全（<code>\\</code> 换行、更多 TeX 包）</td></tr>
           <tr><th>Mermaid 版本</th><td>✅ <strong>11.14</strong>（更新）</td><td>11.13（刚加 Venn + Ishikawa）</td></tr>
           <tr><th>导出 PDF / DOCX / HTML / PNG</th><td>✅</td><td>✅</td></tr>
-          <tr><th>Pandoc 导出（EPUB / ODT / LaTeX）</th><td>✅</td><td>❌</td></tr>
+          <tr><th>Pandoc 导出（EPUB / ODT / LaTeX）</th><td>🟡 支持 —— 需 PATH 上装 Pandoc</td><td>🟡 支持 —— 需另装 Pandoc</td></tr>
           <tr><th>多编码（GBK / Big5 / Shift-JIS）</th><td>✅ 自动识别（chardetng）</td><td>⚠️ 仅 UTF-8</td></tr>
           <tr><th>中文标点校对</th><td>✅ <strong>v2.5</strong></td><td>❌</td></tr>
           <tr><th>Vim 模式</th><td>✅</td><td>❌</td></tr>
@@ -128,6 +147,35 @@ const lang = 'zh' as const;
         <li>多编码自动识别</li>
       </ul>
 
+      <h2>Typora 社区自己最想要的功能 —— SoloMD 已全部交付</h2>
+      <p>
+        以下是 Typora 官方反馈区（<a href="https://github.com/typora/typora-issues/issues" rel="external">typora/typora-issues</a>）
+        里点赞最高、至今仍未实现的请求，有些从 2016–2018 年开着到现在。SoloMD
+        早已全部交付 —— 免费，且全平台：
+      </p>
+      <table class="compare-detail">
+        <thead>
+          <tr><th>Typora 社区长期请求</th><th>SoloMD</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Windows / Linux 上的多标签（2017 年至今）</td><td>✅ 全平台多标签</td></tr>
+          <tr><td>在当前标签 / 新标签 / 新窗口打开</td><td>✅ 可配置</td></tr>
+          <tr><td>源码管理集成</td><td>✅ 内置 AutoGit（逐笔历史、diff、回滚）+ GitHub 同步</td></tr>
+          <tr><td>Wiki 式 <code>[[链接]]</code></td><td>✅ wikilink + 反向链接面板</td></tr>
+          <tr><td>演示 / 幻灯片模式</td><td>✅ 完整 reveal.js（<code>⌘⌥P</code>）</td></tr>
+          <tr><td>学术引用 / 参考文献</td><td>✅ <code>@citekey</code> + .bib / CSL</td></tr>
+          <tr><td>Vim 键位</td><td>✅ Vim 模式</td></tr>
+          <tr><td>更多图表格式</td><td>✅ Mermaid 11.14（+ KaTeX）</td></tr>
+          <tr><td>插件 / 可扩展性</td><td>✅ MCP 端点 + 可脚本化 CLI + agent recipes（任何 LLM 客户端都能驱动你的笔记库）</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:0.95rem;color:var(--text-muted);">
+        你现有的 Typora 笔记原样打开：SoloMD 读 Typora 的
+        <code>./images/&lt;笔记名&gt;/</code> 附件布局（设置 → 写作 → 附件模式里选），
+        中文 / 带空格的目录名下图片也能正常渲染。不转换、不锁定 —— 仍是你文件夹里的纯
+        <code>.md</code>。
+      </p>
+
       <h2>两者都做得好的</h2>
       <ul>
         <li>KaTeX 数学（行内 <code>$a^2+b^2=c^2$</code> 和块 <code>$$...$$</code>）</li>
@@ -166,6 +214,8 @@ const lang = 'zh' as const;
 
       <h3>支持 Typora 主题吗？</h3>
       <p>主题 CSS 选择器不完全兼容，但 SoloMD 支持在「设置 → 自定义 CSS」里选任意 .css 文件覆盖默认样式。</p>
+
+      <CompareFaq heading="常见问题" items={FAQ} />
 
       <div class="compare-cta">
         <a href="/zh/#download" class="btn btn--primary">下载 SoloMD</a>

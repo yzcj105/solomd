@@ -1,6 +1,9 @@
 #[path = "commands.rs"]
 mod commands;
 
+#[path = "image_upload.rs"]
+mod image_upload;
+
 #[path = "search.rs"]
 mod search;
 
@@ -15,6 +18,10 @@ mod workspace_index;
 
 #[path = "spellcheck.rs"]
 mod spellcheck;
+
+// #102 — AI key storage abstraction; declared before ai_proxy which uses it.
+#[path = "ai_keystore.rs"]
+mod ai_keystore;
 
 #[path = "ai_proxy.rs"]
 mod ai_proxy;
@@ -100,6 +107,28 @@ mod recipe_runner;
 // v4.0 — bundled recipe cookbook (10+ ready-to-edit YAML templates).
 #[path = "cookbook.rs"]
 mod cookbook;
+
+// v2.4 — integrations panel (CLI status, MCP path, AI-client config
+// discovery) + v4.4.5 MCP auto-install (detect_ai_clients / inject_mcp /
+// remove_mcp). Was historically only declared in lib.rs (the mobile entry
+// point), so the desktop binary's frontend couldn't reach any of the
+// commands. Adding the path here too is the same dual-declaration trick
+// recipe_runner and rest_api use to live in both compilation roots.
+#[path = "integrations.rs"]
+mod integrations;
+
+// v2.3 RAG / semantic search. Same dual-declaration pattern — surfaced
+// as bug #94 ("Command rag_reindex not found"): the rag::* commands
+// were only in lib.rs, so the desktop Settings → Integrations →
+// "Re-index now" button always hit a "command not found" wall.
+#[path = "rag.rs"]
+mod rag;
+
+// v4.1 — About-dialog build-info command. Same dual-declaration gap as
+// rag — registered in lib.rs only, missing from the desktop runner,
+// so the About panel's build details fell back silently on desktop.
+#[path = "app_build.rs"]
+mod app_build;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -187,6 +216,16 @@ struct MenuStrings {
     toggle_sidebar: &'static str,
     toggle_outline: &'static str,
     cycle_view: &'static str,
+    // v4.3.0 PR #74 — 3-axis zoom (UI / Editor / Preview).
+    ui_zoom_in: &'static str,
+    ui_zoom_out: &'static str,
+    ui_zoom_reset: &'static str,
+    editor_zoom_in: &'static str,
+    editor_zoom_out: &'static str,
+    editor_zoom_reset: &'static str,
+    preview_zoom_in: &'static str,
+    preview_zoom_out: &'static str,
+    preview_zoom_reset: &'static str,
     palette: &'static str,
     global_search: &'static str,
     settings_menu: &'static str,
@@ -215,6 +254,15 @@ fn strings_for(lang: &str) -> MenuStrings {
             toggle_sidebar: "切换文件树",
             toggle_outline: "切换大纲",
             cycle_view: "切换视图模式 (编辑/分栏/预览)",
+            ui_zoom_in: "整体界面：放大",
+            ui_zoom_out: "整体界面：缩小",
+            ui_zoom_reset: "整体界面：复位",
+            editor_zoom_in: "编辑器：放大字号",
+            editor_zoom_out: "编辑器：缩小字号",
+            editor_zoom_reset: "编辑器：复位字号",
+            preview_zoom_in: "预览：放大字号",
+            preview_zoom_out: "预览：缩小字号",
+            preview_zoom_reset: "预览：复位字号",
             palette: "命令面板",
             global_search: "在文件夹中搜索…",
             settings_menu: "设置…",
@@ -241,6 +289,15 @@ fn strings_for(lang: &str) -> MenuStrings {
             toggle_sidebar: "Toggle File Tree",
             toggle_outline: "Toggle Outline",
             cycle_view: "Cycle Edit/Split/Preview",
+            ui_zoom_in: "UI: Zoom In",
+            ui_zoom_out: "UI: Zoom Out",
+            ui_zoom_reset: "UI: Reset Zoom",
+            editor_zoom_in: "Editor: Zoom In",
+            editor_zoom_out: "Editor: Zoom Out",
+            editor_zoom_reset: "Editor: Reset Zoom",
+            preview_zoom_in: "Preview: Zoom In",
+            preview_zoom_out: "Preview: Zoom Out",
+            preview_zoom_reset: "Preview: Reset Zoom",
             palette: "Command Palette",
             global_search: "Search in Folder…",
             settings_menu: "Settings…",
@@ -323,6 +380,37 @@ fn build_app_menu<R: tauri::Runtime>(
     let cycle_view = MenuItemBuilder::with_id("view.cycleView", s.cycle_view)
         .accelerator("CmdOrCtrl+Shift+P")
         .build(app)?;
+    // v4.3.0 PR #74 — three independent zoom axes wired through native
+    // menu accelerators (more reliable than JS keyboard handlers on macOS,
+    // which the WKWebView can sometimes intercept). Action ids are
+    // dispatched in App.vue's `dispatchMenuAction`.
+    let ui_zoom_in = MenuItemBuilder::with_id("view.zoomUiIn", s.ui_zoom_in)
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let ui_zoom_out = MenuItemBuilder::with_id("view.zoomUiOut", s.ui_zoom_out)
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+    let ui_zoom_reset = MenuItemBuilder::with_id("view.zoomUiReset", s.ui_zoom_reset)
+        .accelerator("CmdOrCtrl+0")
+        .build(app)?;
+    let editor_zoom_in = MenuItemBuilder::with_id("view.zoomEditorIn", s.editor_zoom_in)
+        .accelerator("CmdOrCtrl+Shift+=")
+        .build(app)?;
+    let editor_zoom_out = MenuItemBuilder::with_id("view.zoomEditorOut", s.editor_zoom_out)
+        .accelerator("CmdOrCtrl+Shift+-")
+        .build(app)?;
+    let editor_zoom_reset = MenuItemBuilder::with_id("view.zoomEditorReset", s.editor_zoom_reset)
+        .accelerator("CmdOrCtrl+Shift+0")
+        .build(app)?;
+    let preview_zoom_in = MenuItemBuilder::with_id("view.zoomPreviewIn", s.preview_zoom_in)
+        .accelerator("CmdOrCtrl+Control+=")
+        .build(app)?;
+    let preview_zoom_out = MenuItemBuilder::with_id("view.zoomPreviewOut", s.preview_zoom_out)
+        .accelerator("CmdOrCtrl+Control+-")
+        .build(app)?;
+    let preview_zoom_reset = MenuItemBuilder::with_id("view.zoomPreviewReset", s.preview_zoom_reset)
+        .accelerator("CmdOrCtrl+Control+0")
+        .build(app)?;
     let palette = MenuItemBuilder::with_id("view.cmdPalette", s.palette)
         .accelerator("CmdOrCtrl+Shift+K")
         .build(app)?;
@@ -339,6 +427,18 @@ fn build_app_menu<R: tauri::Runtime>(
         .item(&toggle_sidebar)
         .item(&toggle_outline)
         .item(&cycle_view)
+        .separator()
+        .item(&ui_zoom_in)
+        .item(&ui_zoom_out)
+        .item(&ui_zoom_reset)
+        .separator()
+        .item(&editor_zoom_in)
+        .item(&editor_zoom_out)
+        .item(&editor_zoom_reset)
+        .separator()
+        .item(&preview_zoom_in)
+        .item(&preview_zoom_out)
+        .item(&preview_zoom_reset)
         .separator()
         .item(&palette)
         .item(&global_search)
@@ -471,7 +571,22 @@ fn fit_main_window_once(win: &tauri::WebviewWindow) {
 ///
 /// 40px is reserved at the top of the work area for the macOS menu bar.
 fn clamp_window_to_monitor(win: &tauri::WebviewWindow) {
+    // A maximized or fullscreen window is already sized to the monitor by the
+    // OS — clamping it would call set_size(), which un-maximizes and shrinks
+    // it. That's the Windows "restores maximized, then shrinks" bug (#56): the
+    // window-state plugin restored the maximized state, then this clamp fired
+    // on the restore's Resized event and undid it. Leave such windows alone.
+    if win.is_maximized().unwrap_or(false) || win.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+
+    // The macOS global menu bar overlays the top of the screen, so reserve a
+    // strip for it. Windows / Linux have no such bar — reserving there made a
+    // legitimately near-full-height restored window get shrunk by 40px.
+    #[cfg(target_os = "macos")]
     const MENU_BAR_RESERVE: i32 = 40;
+    #[cfg(not(target_os = "macos"))]
+    const MENU_BAR_RESERVE: i32 = 0;
     const MIN_W: i32 = 480;
     const MIN_H: i32 = 360;
 
@@ -525,13 +640,48 @@ pub fn run_with(initial_file: Option<String>) {
     let saved_lang = read_saved_language();
     apply_macos_language(&saved_lang);
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // #86/#87(1) — single-instance must register BEFORE any other plugin so
+    // its handler hooks into the OS' "another instance launching" signal
+    // before the rest of the app starts initialising. The second launch
+    // reactivates the existing main window and routes any file argument
+    // through the existing `solomd://opened-file` channel that App.vue
+    // already listens on (used by the OS file association too).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(
+        |app: &tauri::AppHandle, argv: Vec<String>, _cwd: String| {
+            use tauri::Emitter;
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            for arg in argv.iter().skip(1) {
+                if !arg.is_empty() && !arg.starts_with('-') {
+                    let _ = app.emit("solomd://opened-file", arg.clone());
+                }
+            }
+        },
+    ));
+
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init());
 
+    // v4.3.x — issue #56 reopen: the original fix landed in `lib.rs::run`
+    // but `main.rs` calls `runner::run_with` instead, so the StateFlags::all()
+    // call there was never reached. The plugin's default StateFlags is
+    // `POSITION | SIZE` — missing MAXIMIZED + FULLSCREEN + DECORATIONS,
+    // which is why Windows users kept seeing the maximized state forgotten
+    // on relaunch. Patch this site (the live one) too.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_state_flags(tauri_plugin_window_state::StateFlags::all())
+            .build(),
+    );
 
     let app = builder
         .manage(PendingOpen(Mutex::new(pending)))
@@ -544,6 +694,7 @@ pub fn run_with(initial_file: Option<String>) {
             commands::write_binary_file,
             commands::print_webview,
             commands::copy_file,
+            image_upload::upload_image,
             commands::list_dir,
             commands::fs_create_file,
             commands::fs_create_dir,
@@ -562,6 +713,13 @@ pub fn run_with(initial_file: Option<String>) {
             workspace_index::workspace_index_tags,
             workspace_index::workspace_index_resolve,
             workspace_index::workspace_index_rescan,
+            // v4.6 — these were only registered in the dead-code lib.rs::run();
+            // the desktop binary uses runner::run_with(), so the F1 property
+            // writes + F3 inverse-relationship lookup 404'd at runtime until
+            // registered here too. (Same class as the #94 rag::* omission.)
+            workspace_index::workspace_index_referenced_by,
+            commands::update_frontmatter_property,
+            commands::delete_frontmatter_property,
             spellcheck::spellcheck_init,
             spellcheck::spellcheck_check,
             spellcheck::spellcheck_suggest,
@@ -651,6 +809,20 @@ pub fn run_with(initial_file: Option<String>) {
             mcp_profiles::mcp_profiles_save,
             mcp_profiles::mcp_profiles_delete,
             mcp_profiles::mcp_profiles_export_config,
+            integrations::cli_status,
+            integrations::mcp_path,
+            integrations::mcp_claude_desktop_config_path,
+            integrations::detect_ai_clients,
+            integrations::inject_mcp,
+            integrations::remove_mcp,
+            // #94 — desktop was missing rag::* (registered only in lib.rs).
+            rag::rag_set_enabled,
+            rag::rag_index_status,
+            rag::rag_reindex,
+            rag::rag_search,
+            rag::rag_reindex_file,
+            // about-dialog build info (was lib.rs-only too).
+            app_build::app_build_info,
             recipe_runner::recipes_list,
             recipe_runner::recipes_get,
             recipe_runner::recipes_save,
@@ -764,8 +936,11 @@ pub fn run_with(initial_file: Option<String>) {
             // ---- Window close: intercept and ask frontend ----
             // Only the main window gets the unsaved-tabs check. Auxiliary
             // windows (slideshow, "open file in new window" spawns labelled
-            // `solomd-…`) close directly, otherwise their close event would
-            // trigger the main window's listener and shut down the editor.
+            // `solomd-window-N` — #103) close directly: their frontend
+            // (App.vue's onCloseRequested for aux labels) removes them from
+            // the shared windows registry so they don't resurrect next launch.
+            // Routing them through the main window's listener would instead
+            // shut down the editor.
             RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { api, .. },
                 label,
@@ -781,6 +956,23 @@ pub fn run_with(initial_file: Option<String>) {
                 // Prevent the close and ask the frontend to check unsaved tabs.
                 api.prevent_close();
                 let _ = app_handle.emit("solomd://close-requested", ());
+            }
+
+            // ---- Auxiliary window destroyed ----
+            // #103 — when an auxiliary window is fully torn down, tell any
+            // window still alive so it can reconcile the shared windows
+            // registry. The destroyed window's own `onCloseRequested` handler
+            // already unregisters it in the normal path; this event is the
+            // backstop for teardowns that bypass CloseRequested, keeping the
+            // registry from resurrecting a window the user actually closed.
+            RunEvent::WindowEvent {
+                event: tauri::WindowEvent::Destroyed,
+                label,
+                ..
+            } => {
+                if label != "main" {
+                    let _ = app_handle.emit("solomd://window-destroyed", label.clone());
+                }
             }
 
             // ---- macOS file open via double-click / Finder ----

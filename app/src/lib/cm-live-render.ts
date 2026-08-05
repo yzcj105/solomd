@@ -38,14 +38,33 @@
 
 import { syntaxTree, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import type { Range } from '@codemirror/state';
+
+// Minimal structural view of a lezer `SyntaxNode`. `@lezer/common` is only a
+// transitive dependency (not in our package.json), so we describe just the
+// tree-walk fields we touch rather than importing the real type.
+export interface MdSyntaxNode {
+  name: string;
+  parent: MdSyntaxNode | null;
+  firstChild: MdSyntaxNode | null;
+  nextSibling: MdSyntaxNode | null;
+}
 import {
   Decoration,
   type DecorationSet,
   EditorView,
   ViewPlugin,
   type ViewUpdate,
+  WidgetType,
 } from '@codemirror/view';
+import { frozenDuringComposition, isImeSafeFlushTransaction } from './cm-ime-guard';
 import { tags as t } from '@lezer/highlight';
+import { isDragging, isDragEndTransaction } from './cm-drag-aware';
+import {
+  findInlineHtmlSpans,
+  findMarkSpans,
+  maskInlineCode,
+  type LiveInlineHtmlKind,
+} from './html-live-render';
 
 // ---------------------------------------------------------------------------
 // Marker nodes that we hide off-line. Brackets/parens for links and
@@ -78,6 +97,25 @@ const emMark = Decoration.mark({ class: 'cm-md-em' });
 const strikeMark = Decoration.mark({ class: 'cm-md-strike' });
 const codeMark = Decoration.mark({ class: 'cm-md-code' });
 const linkMark = Decoration.mark({ class: 'cm-md-link' });
+const htmlUnderlineMark = Decoration.mark({ class: 'cm-md-html-u' });
+const htmlMarkMark = Decoration.mark({ class: 'cm-md-html-mark' });
+const htmlSubMark = Decoration.mark({ class: 'cm-md-html-sub' });
+const htmlSupMark = Decoration.mark({ class: 'cm-md-html-sup' });
+const htmlKbdMark = Decoration.mark({ class: 'cm-md-html-kbd' });
+
+function inlineHtmlMark(kind: LiveInlineHtmlKind): Decoration {
+  switch (kind) {
+    case 'strong': return strongMark;
+    case 'em': return emMark;
+    case 'underline': return htmlUnderlineMark;
+    case 'strike': return strikeMark;
+    case 'mark': return htmlMarkMark;
+    case 'sub': return htmlSubMark;
+    case 'sup': return htmlSupMark;
+    case 'code': return codeMark;
+    case 'kbd': return htmlKbdMark;
+  }
+}
 
 // Block-level line decorations.
 const lineClass = (cls: string) => Decoration.line({ class: cls });
@@ -86,6 +124,71 @@ const fencedLine = lineClass('cm-md-fenced-line');
 const headingLine = (level: number) => lineClass(`cm-md-heading-line cm-md-heading-line-${level}`);
 
 const hideDeco = Decoration.replace({});
+
+// ---------------------------------------------------------------------------
+// List + horizontal-rule rendering (v4.7.1). Off the caret line we render
+// the markdown the way a preview would; on the caret line the raw source is
+// revealed so it stays editable — same model as the inline marks above.
+//   - `- item` / `* item` / `+ item` → the marker becomes a • bullet glyph.
+//   - `1. item`                       → number kept (it IS the visual), just
+//                                       styled; not replaced.
+//   - `- [ ] item`                    → the dash is hidden so the checkbox
+//                                       (rendered by cm-task-list.ts) leads.
+//   - `---` / `***` / `___`           → a real <hr> rule.
+// ---------------------------------------------------------------------------
+// Widgets carry their own inline styling so they render correctly under BOTH
+// the liveEdit theme (here) and the edit-mode livePreview extension
+// (cm-live-preview.ts), which reuses these via the exports below.
+class BulletWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-md-bullet';
+    span.textContent = '•';
+    span.style.color = 'var(--md-list)';
+    span.style.fontWeight = '700';
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
+class HrWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const hr = document.createElement('hr');
+    hr.className = 'cm-md-hr';
+    hr.style.display = 'inline-block';
+    hr.style.width = '100%';
+    hr.style.height = '0';
+    hr.style.margin = '0.2em 0';
+    hr.style.border = 'none';
+    hr.style.borderTop = '1px solid var(--border)';
+    hr.style.verticalAlign = 'middle';
+    return hr;
+  }
+}
+
+export const bulletDeco = Decoration.replace({ widget: new BulletWidget() });
+export const hrDeco = Decoration.replace({ widget: new HrWidget() });
+
+// Does the `ListMark`'s ListItem hold a GFM TaskMarker (`[ ]` / `[x]`)?
+// Those are already rendered as a checkbox by cm-task-list.ts, so we hide the
+// leading dash instead of swapping in a bullet.
+export function listItemHasTask(listMark: MdSyntaxNode): boolean {
+  const item = listMark.parent; // ListItem
+  if (!item) return false;
+  for (let child = item.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'TaskMarker' || child.name === 'Task') return true;
+  }
+  return false;
+}
 
 // Heading nodes 1..6 → level
 const HEADING_LEVELS: Record<string, number> = {
@@ -110,6 +213,7 @@ function buildDecorations(view: EditorView): DecorationSet {
   const seenQuoteLines = new Set<number>();
   const seenFencedLines = new Set<number>();
   const seenHeadingLines = new Set<number>();
+  const seenInlineHtmlLines = new Set<number>();
 
   for (const { from, to } of view.visibleRanges) {
     tree.iterate({
@@ -128,7 +232,23 @@ function buildDecorations(view: EditorView): DecorationSet {
         // ---- Marker hiding (off-line only) ----
         if (HIDDEN_MARK_NODES.has(name)) {
           if (!caretTouches && nTo > nFrom) {
-            ranges.push(hideDeco.range(nFrom, nTo));
+            // v4.3.5 #83 — for ATX heading marks (`#`, `##`, …) also hide
+            // the single trailing space that separates the marker from
+            // the heading text. Without this, the space character remains
+            // and renders at the heading line's font-size, so H1 (1.85em
+            // space) visibly indents further than H4 (1.1em space) etc.
+            // Headings end up looking left-staggered instead of aligned.
+            let hideTo = nTo;
+            if (name === 'HeaderMark') {
+              const line = view.state.doc.lineAt(nFrom);
+              // Setext headings put `HeaderMark` on the underline (---/===)
+              // line, with no following space to eat. Only widen for ATX.
+              if (line.from === nFrom && nTo - nFrom <= 6) {
+                const after = view.state.doc.sliceString(nTo, Math.min(nTo + 1, view.state.doc.length));
+                if (after === ' ') hideTo = nTo + 1;
+              }
+            }
+            ranges.push(hideDeco.range(nFrom, hideTo));
           }
           return;
         }
@@ -218,8 +338,77 @@ function buildDecorations(view: EditorView): DecorationSet {
           }
           return;
         }
+
+        // ---- List markers (v4.7.1) ----
+        // Bullets (`-`/`*`/`+`) become a • glyph; ordered numbers stay; a
+        // task item's dash is hidden so the checkbox widget leads. Revealed
+        // (raw) on the caret line so the marker stays editable.
+        if (name === 'ListMark') {
+          if (caretTouches || nTo <= nFrom) return;
+          const mark = view.state.doc.sliceString(nFrom, nTo);
+          const isBullet = mark === '-' || mark === '*' || mark === '+';
+          if (!isBullet) return; // ordered list ("1.", "2)") keeps its number
+          if (listItemHasTask(node.node as unknown as MdSyntaxNode)) {
+            // Hide "- " (dash + trailing space) — the checkbox renders the item.
+            const after = view.state.doc.sliceString(
+              nTo,
+              Math.min(nTo + 1, view.state.doc.length),
+            );
+            ranges.push(hideDeco.range(nFrom, after === ' ' ? nTo + 1 : nTo));
+          } else {
+            ranges.push(bulletDeco.range(nFrom, nTo));
+          }
+          return;
+        }
+
+        // ---- Horizontal rule (v4.7.1): `---` / `***` / `___` → <hr> ----
+        if (name === 'HorizontalRule') {
+          if (caretTouches || nTo <= nFrom) return;
+          ranges.push(hrDeco.range(nFrom, nTo));
+          return;
+        }
       },
     });
+
+    // Paired inline HTML is valid Markdown, but CodeMirror's live editor used
+    // to leave tags such as `<strong>` and `<sup>` visible; ditto the
+    // markdown-it-mark `==highlight==` the preview renders (#199). Hide the
+    // paired markers and style their contents while the caret is off the
+    // line. Moving the caret onto the line reveals the exact source for
+    // editing. Fenced-code lines and inline-code spans are skipped — they
+    // must show their source verbatim.
+    const firstVisibleLine = view.state.doc.lineAt(from).number;
+    const lastVisibleLine = view.state.doc.lineAt(
+      Math.min(to, view.state.doc.length),
+    ).number;
+    for (let lineNo = firstVisibleLine; lineNo <= lastVisibleLine; lineNo += 1) {
+      if (seenInlineHtmlLines.has(lineNo)) continue;
+      seenInlineHtmlLines.add(lineNo);
+      if (lineNo >= fromLine && lineNo <= toLine) continue;
+      const line = view.state.doc.line(lineNo);
+      if (seenFencedLines.has(line.from)) continue;
+      const base = line.from;
+      const scanText = maskInlineCode(line.text);
+      for (const span of findInlineHtmlSpans(scanText)) {
+        ranges.push(hideDeco.range(base + span.openFrom, base + span.openTo));
+        if (span.contentTo > span.contentFrom) {
+          ranges.push(
+            inlineHtmlMark(span.kind).range(
+              base + span.contentFrom,
+              base + span.contentTo,
+            ),
+          );
+        }
+        ranges.push(hideDeco.range(base + span.closeFrom, base + span.closeTo));
+      }
+      for (const span of findMarkSpans(scanText)) {
+        ranges.push(hideDeco.range(base + span.openFrom, base + span.openTo));
+        ranges.push(
+          htmlMarkMark.range(base + span.contentFrom, base + span.contentTo),
+        );
+        ranges.push(hideDeco.range(base + span.closeFrom, base + span.closeTo));
+      }
+    }
   }
 
   // sort = true so CM6 handles (from, side) ordering regardless of the
@@ -236,7 +425,23 @@ const liveRenderPlugin = ViewPlugin.fromClass(
     }
 
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet || u.viewportChanged) {
+      // IME composition guard (#108) — don't rebuild decorations on the
+      // composing line while a Windows IME (Sogou) candidate window is open,
+      // or the mid-composition DOM swap drops the composition ("吃字").
+      const frozen = frozenDuringComposition(u, this.decorations);
+      if (frozen) {
+        this.decorations = frozen;
+        return;
+      }
+      // See cm-drag-aware.ts — freeze marker toggles during pointer drag
+      // so Windows WebView2 doesn't lose pointer capture mid-selection.
+      const dragEnded = u.transactions.some(isDragEndTransaction);
+      const imeFlush = u.transactions.some(isImeSafeFlushTransaction);
+      if (u.docChanged || u.viewportChanged || dragEnded || imeFlush) {
+        this.decorations = buildDecorations(u.view);
+        return;
+      }
+      if (u.selectionSet && !isDragging(u.state)) {
         this.decorations = buildDecorations(u.view);
       }
     }
@@ -291,24 +496,26 @@ const liveEditTheme = EditorView.theme({
   },
   // Heading lines — use line-decoration to size whole line so layout
   // doesn't jump when markers are revealed/hidden.
+  // Note: do NOT set a custom lineHeight here. Heading visual height is
+  // achieved through fontSize + padding alone. Overriding lineHeight per
+  // line breaks CodeMirror's posAtCoords math (it caches line-box metrics
+  // measured against the base lineHeight), making click-to-position land
+  // on the wrong line. Keep line-height uniform at the .cm-scroller base.
   '.cm-md-heading-line-1': {
     fontSize: '1.85em',
     fontWeight: '700',
-    lineHeight: '1.25',
     paddingTop: '0.4em',
     paddingBottom: '0.15em',
   },
   '.cm-md-heading-line-2': {
     fontSize: '1.5em',
     fontWeight: '700',
-    lineHeight: '1.3',
     paddingTop: '0.3em',
     paddingBottom: '0.1em',
   },
   '.cm-md-heading-line-3': {
     fontSize: '1.22em',
     fontWeight: '700',
-    lineHeight: '1.35',
   },
   '.cm-md-heading-line-4': { fontSize: '1.1em', fontWeight: '700' },
   '.cm-md-heading-line-5': { fontWeight: '700' },
@@ -327,6 +534,21 @@ const liveEditTheme = EditorView.theme({
   '.cm-md-strong': { fontWeight: '700', color: 'var(--md-strong)' },
   '.cm-md-em': { fontStyle: 'italic', color: 'var(--md-em)' },
   '.cm-md-strike': { textDecoration: 'line-through', color: 'var(--text-muted)' },
+  '.cm-md-html-u': { textDecoration: 'underline' },
+  '.cm-md-html-mark': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
+    borderRadius: '2px',
+  },
+  '.cm-md-html-sub': { fontSize: '0.75em', verticalAlign: 'sub' },
+  '.cm-md-html-sup': { fontSize: '0.75em', verticalAlign: 'super' },
+  '.cm-md-html-kbd': {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.82em',
+    backgroundColor: 'var(--md-code-bg)',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    padding: '0.05em 0.3em',
+  },
 
   '.cm-md-code': {
     fontFamily: 'var(--font-mono)',
@@ -342,6 +564,24 @@ const liveEditTheme = EditorView.theme({
     textUnderlineOffset: '2px',
   },
 
+  // v4.7.1 — bullet glyph that replaces a `-`/`*`/`+` list marker off-line.
+  '.cm-md-bullet': {
+    color: 'var(--md-list)',
+    fontWeight: '700',
+  },
+
+  // v4.7.1 — `---` / `***` / `___` rendered as a real rule off-line. The
+  // widget replaces the whole marker run, so make it span the text column.
+  '.cm-md-hr': {
+    display: 'inline-block',
+    width: '100%',
+    height: '0',
+    margin: '0.2em 0',
+    border: 'none',
+    borderTop: '1px solid var(--border)',
+    verticalAlign: 'middle',
+  },
+
   '.cm-md-quote-line': {
     borderLeft: '3px solid var(--border)',
     paddingLeft: '12px',
@@ -353,6 +593,20 @@ const liveEditTheme = EditorView.theme({
   '.cm-md-fenced-line': {
     backgroundColor: 'var(--md-code-bg)',
     fontFamily: 'var(--font-mono)',
+  },
+
+  // #82 / #44 — selection highlight inside code was invisible in live-edit.
+  // Inline `.cm-md-code` and `.cm-md-fenced-line` paint an opaque
+  // `--md-code-bg`, and CM6's `layer` extension writes inline
+  // `style="z-index: -2"` on `.cm-selectionLayer`, parking the selection
+  // BENEATH those backgrounds. `!important` beats the inline style so the
+  // selection layer sits above the code bg; 45% alpha keeps the code text
+  // readable through the highlight. (The same fix already lives in
+  // cm-live-preview.ts — the earlier patches only covered that mode, not
+  // this one, which is the WYSIWYG "live edit" the reporters actually use.)
+  '.cm-selectionLayer': { zIndex: '2 !important' },
+  '.cm-selectionBackground': {
+    backgroundColor: 'rgba(255,159,64,0.45) !important',
   },
 });
 
@@ -402,8 +656,15 @@ export const LIVE_EDIT_CLASSES = [
   'cm-md-strong',
   'cm-md-em',
   'cm-md-strike',
+  'cm-md-html-u',
+  'cm-md-html-mark',
+  'cm-md-html-sub',
+  'cm-md-html-sup',
+  'cm-md-html-kbd',
   'cm-md-code',
   'cm-md-link',
   'cm-md-quote-line',
   'cm-md-fenced-line',
+  'cm-md-bullet',
+  'cm-md-hr',
 ] as const;

@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { DsModal } from '../ui';
+import BrandMark from './BrandMark.vue';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -18,7 +20,10 @@ onMounted(async () => {
 const links = {
   website: 'https://solomd.app',
   github: 'https://github.com/zhitongblog/solomd',
-  releases: 'https://github.com/zhitongblog/solomd/releases',
+  // Update/version-history surfaces point at solomd.app, not GitHub: the
+  // site serves mainland users (Cloudflare edge + Gitee mirror links) where
+  // github.com often doesn't resolve. Same policy as the update toast (#154).
+  releases: 'https://solomd.app/whats-new',
   sponsor: 'https://solomd.app/#sponsor',
 };
 
@@ -34,12 +39,19 @@ async function visit(url: string) {
 </script>
 
 <template>
-  <div v-if="open" class="about__backdrop" @click.self="emit('close')">
-    <div class="about" role="dialog" aria-label="About SoloMD">
-      <button class="about__close" @click="emit('close')" aria-label="Close">×</button>
+  <DsModal
+    :model-value="open"
+    width="440px"
+    @update:model-value="emit('close')"
+  >
+    <!-- Empty header slot keeps DsModal's × close button without a title bar,
+         since the About content is centered branding rather than a labelled
+         form. -->
+    <template #header><span class="about__hdr" aria-label="About SoloMD"></span></template>
 
+    <div class="about">
       <div class="about__brand">
-        <span class="brand"><span class="brand__h">#</span><span class="brand__md">MD</span></span>
+        <BrandMark class="brand" :size="64" label="SoloMD" />
       </div>
 
       <h2 class="about__name">SoloMD</h2>
@@ -73,8 +85,8 @@ async function visit(url: string) {
         <button class="about__link" @click="visit(links.releases)">
           <span class="about__link-icon">📦</span>
           <div>
-            <div class="about__link-title">Releases / 历史版本</div>
-            <div class="about__link-url">github.com/.../releases</div>
+            <div class="about__link-title">What's New / 更新日志</div>
+            <div class="about__link-url">solomd.app/whats-new</div>
           </div>
         </button>
         <button class="about__link" @click="visit(links.sponsor)">
@@ -91,48 +103,15 @@ async function visit(url: string) {
         Tauri 2 · Vue 3 · CodeMirror 6 · Rust
       </div>
     </div>
-  </div>
+  </DsModal>
 </template>
 
 <style scoped>
-.about__backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
 .about {
-  background: var(--bg-elev);
-  width: min(440px, 92vw);
-  max-height: 90vh;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-  padding: 28px 32px 24px;
   text-align: center;
-  position: relative;
-  overflow-y: auto;
 }
-.about__close {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  font-size: 22px;
-  line-height: 1;
-  padding: 4px 8px;
-  color: var(--text-faint);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  border-radius: 6px;
-}
-.about__close:hover {
-  color: var(--text);
-  background: var(--bg-hover);
+.about__hdr {
+  flex: 1;
 }
 .about__brand {
   display: flex;
@@ -140,19 +119,10 @@ async function visit(url: string) {
   margin-bottom: 6px;
 }
 .brand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 64px;
   height: 64px;
   border-radius: 14px;
-  background: #000;
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 22px;
 }
-.brand__h { color: var(--accent); }
-.brand__md { color: #ffffff; }
 
 .about__name {
   margin: 14px 0 2px;

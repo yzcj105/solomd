@@ -49,6 +49,15 @@ watch(query, () => {
   debounceTimer = window.setTimeout(doSearch, 220);
 });
 
+// #92 — keep the keyboard-selected hit scrolled into view, matching the
+// CommandPalette / QuickSwitcher behaviour (arrow-down past the fold was
+// hiding the highlighted result here).
+watch(selectedIdx, async () => {
+  await nextTick();
+  const item = document.querySelectorAll<HTMLElement>('.rag__results .rag__hit')[selectedIdx.value];
+  item?.scrollIntoView({ block: 'nearest' });
+});
+
 async function doSearch() {
   const q = query.value.trim();
   if (!q) {
@@ -133,6 +142,7 @@ const scoreColor = (score: number) => {
 </script>
 
 <template>
+  <Teleport to="body">
   <div v-if="open" class="rag__backdrop" @click.self="emit('close')">
     <div class="rag" role="dialog" aria-label="Semantic search">
       <div class="rag__header">
@@ -214,6 +224,7 @@ const scoreColor = (score: number) => {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -225,7 +236,7 @@ const scoreColor = (score: number) => {
   justify-content: center;
   align-items: flex-start;
   padding-top: 10vh;
-  z-index: 1000;
+  z-index: var(--z-modal);
 }
 .rag {
   width: min(760px, 94vw);

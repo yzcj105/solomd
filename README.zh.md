@@ -88,6 +88,9 @@ solomd agent "把这周的 daily 整理成 weekly review，提交并推送"
 
 最新版本:[**v4.0.0**](https://github.com/zhitongblog/solomd/releases/latest)。
 
+**系统要求:**Windows 10+、macOS 10.15+、主流 Linux 发行版、iOS 15+、Android 7+(API 24)。
+Windows 7/8/8.1 无法支持——编译 SoloMD 的 Rust 工具链自 1.78 起要求 Windows 10,且微软已将 Windows 7 上的 WebView2(SoloMD 的渲染引擎)冻结在 109 版并停止安全更新——也不存在可用的历史版本。
+
 ### macOS — universal dmg(Apple Silicon + Intel,已签名 + 公证)
 
 ```bash
@@ -131,23 +134,24 @@ winget install solomd
 
 ## 横向对比
 
-| | SoloMD v4.0 | Obsidian | Typora | Tolaria |
+| | SoloMD v4.5 | Obsidian | Typora | Tolaria |
 |---|---|---|---|---|
 | 协议 | **MIT** | 私有协议(免费) | 付费($14.99) | AGPL |
 | 技术栈 | Tauri 2(Rust + WebView) | Electron | Electron | Tauri 2 |
-| 平台 | macOS · Win · Linux · iPad | macOS · Win · Linux · iOS · Android | macOS · Win · Linux | macOS · Linux |
+| 平台 | macOS · Win · Linux · **iPad/iOS/安卓** | macOS · Win · Linux · iOS · Android | macOS · Win · Linux | macOS · Win · Linux |
 | 安装包 | ~32 MB(Mac)/ ~10 MB(Win) | ~120 MB | ~95 MB | ~25 MB |
-| **内置 Agent 面板** | **✅ v4.0** | 🟡 付费插件(Smart Composer / Copilot) | ❌ | 🟡 仅外部 MCP |
+| **内置 Agent 面板** | **✅ v4.0** | 🟡 付费插件(Smart Composer / Copilot) | ❌ | 🟡 provider+agent,无内嵌面板 |
 | **定时 Agent Recipe** | **✅ v4.0** | ❌ | ❌ | ❌ |
 | **AutoGit 分支沙箱 + accept/reject** | **✅ v4.0** | ❌ | ❌ | ❌ |
 | **可重放 Agent Trace** | **✅ v4.0** | ❌ | ❌ | ❌ |
-| **多 vault MCP Federation** | **✅ v4.0** | ❌ | ❌ | ❌ |
+| **多工作区** | **✅ v4.0 MCP Federation** | ❌ | ❌ | 🟡 多 vault |
 | **MCP server** | **✅ 内置 13 工具,5 个独家** | ❌(社区插件) | ❌ | ✅ 通用 |
-| **AI 改写内建** | **✅ 14 个 BYOK 服务** | 仅插件 | ❌ | 通过外部 MCP |
-| GitHub 同步 | ✅ | ❌(Obsidian Sync $96/年) | ❌ | ❌ |
+| **AI 改写内建** | **✅ 14 个 BYOK 服务** | 仅插件 | ❌ | ✅ 内置 provider |
+| GitHub 同步 | ✅ | ❌(Obsidian Sync $5/月) | ❌ | ❌ |
 | 端到端加密 | ✅ 在你自己的库里 | ✅ 在 Obsidian 服务器上 | ❌ | ❌ |
 | 本地语义搜索 | ✅ 默认关 | 仅插件 | ❌ | ❌ |
 | 每篇笔记版本历史 | ✅ AutoGit | 仅插件 | ❌ | ✅ |
+| Markdown 白板(tldraw) | ❌ | 🟡 Canvas(私有格式) | ❌ | ✅ |
 | CJK 编码(GBK / Big5) | ✅ 自动识别 | ❌ | ❌ | ❌ |
 
 详细对比:[vs Obsidian](https://solomd.app/zh/compare/vs-obsidian) · [vs Typora](https://solomd.app/zh/compare/vs-typora) · [vs Tolaria](https://solomd.app/zh/compare/vs-tolaria) · [vs Marktext](https://solomd.app/zh/compare/vs-marktext)。

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useTabsStore } from '../stores/tabs';
+import { useSettingsStore } from '../stores/settings';
 import { extractOutline, type OutlineItem } from '../lib/markdown';
 
 interface OutlineNode {
@@ -17,6 +18,7 @@ interface VisibleOutlineItem extends OutlineItem {
 const props = defineProps<{ cursorLine?: number }>();
 const emit = defineEmits<{ (e: 'goto', line: number): void }>();
 const tabs = useTabsStore();
+const settings = useSettingsStore();
 const listRef = ref<HTMLUListElement | null>(null);
 const collapsedByTab = ref<Record<string, number[]>>({});
 
@@ -36,12 +38,24 @@ const collapsedByTab = ref<Record<string, number[]>>({});
 const LABEL_ALPHABET = 'abcdefhijklmnopqrstuvwxyz123456789'.split(''); // skip 'g'
 
 function labelAt(index: number): string {
+  // v4.6.2 — marker style is user-configurable (Settings → Writing):
+  //   'none'   → no marker
+  //   'number' → clean sequential 1/2/3… (single-digit ones still keyboard-jump)
+  //   'jump'   → a/b/c… keyboard-jump labels (default; mixes letters + digits)
+  const marker = settings.outlineMarker;
+  if (marker === 'none') return '';
+  if (marker === 'number') return String(index + 1);
   if (index < LABEL_ALPHABET.length) return LABEL_ALPHABET[index];
-  // Two-char fallback for very long docs: aa, ab, ..., zz
-  const a = Math.floor((index - LABEL_ALPHABET.length) / 26);
-  const b = (index - LABEL_ALPHABET.length) % 26;
-  if (a >= 26) return ''; // out of room — happens past ~700 entries
-  return 'abcdefhijklmnopqrstuvwxyz'[a] + 'abcdefhijklmnopqrstuvwxyz'[b];
+  // Two-char fallback for very long docs: aa, ab, ..., zz. The alphabet skips
+  // 'g' (reserved for the g+digits line-jump), so it is 25 chars — divide and
+  // wrap by its real length, not 26, or every 25th label reads "aundefined"
+  // (#206: the [25] lookup was out of bounds).
+  const TWO_CHAR = 'abcdefhijklmnopqrstuvwxyz';
+  const n = TWO_CHAR.length;
+  const a = Math.floor((index - LABEL_ALPHABET.length) / n);
+  const b = (index - LABEL_ALPHABET.length) % n;
+  if (a >= n) return ''; // out of room — happens past ~650 entries
+  return TWO_CHAR[a] + TWO_CHAR[b];
 }
 
 type JumpMode = 'idle' | 'line-jump';
@@ -286,7 +300,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
       <span class="outline__statusbar-hint">Enter ↵ goto · Esc cancel</span>
     </div>
     <div v-else-if="visibleItems.length" class="outline__statusbar outline__statusbar--idle">
-      <span class="outline__statusbar-hint">letter → jump · g+digits → line</span>
+      <span class="outline__statusbar-hint">{{ settings.outlineMarker === 'none' ? 'g+digits → line' : (settings.outlineMarker === 'number' ? 'number → jump · g+digits → line' : 'letter → jump · g+digits → line') }}</span>
     </div>
   </aside>
 </template>

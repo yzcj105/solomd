@@ -1,4 +1,5 @@
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { EditorView } from '@codemirror/view';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText, writeHtml, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
@@ -7,7 +8,8 @@ import { isIOS } from '../lib/platform';
 import { markdownToDocxBlob } from '../lib/docx-export';
 import { markdownToPdfBlob } from '../lib/pdf-export';
 import { markdownToImageBlob } from '../lib/image-export';
-import { renderMarkdown } from '../lib/markdown';
+import { renderMarkdown, extractImageRoot } from '../lib/markdown';
+import { rewriteLinkUrls, rewriteImageUrls } from '../lib/image-resolve';
 import { useTabsStore } from '../stores/tabs';
 import { useSettingsStore } from '../stores/settings';
 import { useToastsStore } from '../stores/toasts';
@@ -205,14 +207,116 @@ function stripMarkdown(src: string): string {
  * `@mousedown.prevent` (focus preserved), or a plain `@click` button (focus
  * lost — but the selection range survives).
  */
-function getEditorSelectionMd(): string | null {
-  if (typeof document === 'undefined') return null;
+/**
+ * Read the active editor selection straight from CodeMirror's `EditorView`
+ * state — the source of truth. This is required for **rectangular / column
+ * selections** (#90): those are *multiple* selection ranges, which Chromium /
+ * WebView2's single-range `window.getSelection()` can't represent, so the old
+ * DOM-based reader saw a collapsed/empty selection and callers fell back to
+ * the *whole document* ("select a block, copy → got everything"). Reading the
+ * ranges from CM state also survives the editor losing DOM focus when a
+ * toolbar Copy button is clicked (CM keeps the selection in state).
+ *
+ * Ranges are joined with the document's own line break, matching CodeMirror's
+ * native multi-selection copy.
+ */
+function cmSelectionText(): string | null {
+  const editors = Array.from(document.querySelectorAll<HTMLElement>('.cm-editor'));
+  if (!editors.length) return null;
+  // Prefer the focused editor; fall back to any editor that holds a non-empty
+  // selection (covers blur-on-toolbar-click and split panes / tiles).
+  const focused = document.querySelector<HTMLElement>('.cm-editor.cm-focused');
+  const ordered = focused ? [focused, ...editors.filter((e) => e !== focused)] : editors;
+  for (const el of ordered) {
+    const view = EditorView.findFromDOM(el);
+    if (!view) continue;
+    const parts: string[] = [];
+    for (const r of view.state.selection.ranges) {
+      if (r.empty) continue;
+      parts.push(view.state.sliceDoc(r.from, r.to));
+    }
+    if (parts.length) {
+      const text = parts.join(view.state.lineBreak);
+      return text.trim() ? text : null;
+    }
+  }
+  return null;
+}
+
+/** Nearest ancestor element carrying a source-line annotation, walking up. */
+function elementWithSourceLine(node: Node | null): HTMLElement | null {
+  let n: Node | null = node;
+  while (n && n.nodeType === Node.TEXT_NODE) n = n.parentNode;
+  let el = n as HTMLElement | null;
+  while (el && el.nodeType === Node.ELEMENT_NODE) {
+    if (el.hasAttribute?.('data-source-line') || el.hasAttribute?.('data-line')) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function sourceLineOf(el: HTMLElement): number {
+  return Number(el.getAttribute('data-source-line') || el.getAttribute('data-line') || 0);
+}
+
+/**
+ * Map a selection inside the rendered **preview pane** back to the Markdown
+ * source. The preview blocks are annotated with `data-source-line` (1-indexed)
+ * by `renderMarkdown`, so we slice `content` from the first selected block to
+ * the end of the last selected block (block-granular — selecting part of a
+ * paragraph copies the whole paragraph's source, which is the sensible
+ * "Copy as Markdown" behaviour). Returns null when the selection isn't in the
+ * preview, so callers fall through to other strategies.
+ *
+ * Fixes: in preview/reading mode, "select a region, copy" used to copy the
+ * **whole document** — the old DOM fallback required the selection to be inside
+ * a `.cm-editor` and bailed for the preview pane.
+ */
+function previewSelectionToSource(content: string): string | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
   const range = sel.getRangeAt(0);
-  // Walk up from the selection's common ancestor to find a `.cm-editor`.
-  // Use Element.closest where available; fall back to manual walk for text
-  // nodes (which don't have closest()).
+  let anc: Node | null = range.commonAncestorContainer;
+  while (anc && anc.nodeType === Node.TEXT_NODE) anc = anc.parentNode;
+  const previewRoot = (anc as Element | null)?.closest?.('.preview-content');
+  if (!previewRoot) return null;
+  const startEl = elementWithSourceLine(range.startContainer);
+  if (!startEl) return null;
+  const endEl = elementWithSourceLine(range.endContainer) ?? startEl;
+  const startLine = sourceLineOf(startEl);
+  if (!startLine) return null;
+  const endLineAttr = sourceLineOf(endEl) || startLine;
+  // Bound the last block: slice up to just before the next annotated block.
+  const nextLines = Array.from(
+    previewRoot.querySelectorAll<HTMLElement>('[data-source-line],[data-line]'),
+  )
+    .map(sourceLineOf)
+    .filter((n) => n > endLineAttr)
+    .sort((a, b) => a - b);
+  const lines = content.split(/\r?\n/);
+  const endLine = nextLines.length ? nextLines[0] - 1 : lines.length;
+  const slice = lines.slice(startLine - 1, Math.max(startLine, endLine)).join('\n');
+  return slice.trim() ? slice : null;
+}
+
+/**
+ * Markdown source for the active selection, or null. Tries, in order:
+ *  1. CodeMirror state — editor selections (normal + rectangular).
+ *  2. Preview pane — map the rendered selection to source lines (needs the
+ *     document `content`, passed by callers).
+ *  3. Raw DOM selection text inside a `.cm-editor` (last-resort).
+ */
+function getEditorSelectionMd(content?: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const cmText = cmSelectionText();
+  if (cmText) return cmText;
+  if (content != null) {
+    const previewText = previewSelectionToSource(content);
+    if (previewText) return previewText;
+  }
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
   let node: Node | null = range.commonAncestorContainer;
   while (node && node.nodeType === Node.TEXT_NODE) node = node.parentNode;
   const inEditor = (node as Element | null)?.closest?.('.cm-editor');
@@ -252,7 +356,7 @@ export function useExport() {
   function copySource(): { source: string; isSelection: boolean } | null {
     const ctx = activeOr();
     if (!ctx) return null;
-    const sel = getEditorSelectionMd();
+    const sel = getEditorSelectionMd(ctx.content);
     return sel !== null
       ? { source: sel, isSelection: true }
       : { source: ctx.content, isSelection: false };
@@ -298,7 +402,16 @@ export function useExport() {
     const filename = `${ctx.baseName}.html`;
     const path = await pickWritePath(filename, [{ name: 'HTML', extensions: ['html'] }]);
     if (!path) return;
-    const html = HTML_TEMPLATE(ctx.baseName, renderMarkdown(ctx.content));
+    // v4.3.0 issue #77 — rewrite local-file `href` / `src` URLs to
+    // absolute `file://` paths so the exported HTML doesn't bake in
+    // `http://tauri.localhost/...` references that break when shared.
+    const imageRoot = extractImageRoot(ctx.content);
+    const body = rewriteLinkUrls(
+      rewriteImageUrls(renderMarkdown(ctx.content), imageRoot, ctx.filePath),
+      imageRoot,
+      ctx.filePath,
+    );
+    const html = HTML_TEMPLATE(ctx.baseName, body);
     try {
       await invoke('write_file', { path, content: html, encoding: 'UTF-8' });
       toasts.success(isIOS() ? iosSavedToast(filename) : 'Exported to HTML');
@@ -373,7 +486,15 @@ export function useExport() {
     // Strip YAML front matter before rendering — users don't want the
     // metadata block to show up in the printed output.
     const source = ctx.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-    const body = renderMarkdown(source);
+    // v4.3.0 issue #77 — same link/image rewriting as the file-export path,
+    // so the print overlay (and therefore the resulting PDF from the system
+    // print dialog) doesn't show `http://tauri.localhost/...` links.
+    const imageRoot = extractImageRoot(source);
+    const body = rewriteLinkUrls(
+      rewriteImageUrls(renderMarkdown(source), imageRoot, ctx.filePath),
+      imageRoot,
+      ctx.filePath,
+    );
 
     let overlay = document.getElementById('solomd-print-overlay') as HTMLDivElement | null;
     if (!overlay) {
@@ -414,13 +535,18 @@ export function useExport() {
     await new Promise((r) => setTimeout(r, 200));
     try {
       await invoke('print_webview');
+      // The native print sheet is modal; by the time invoke resolves,
+      // the user has already dismissed it. Safe to tear down shortly after.
+      setTimeout(cleanup, 100);
     } catch (e) {
       console.error('[print] failed', e);
+      // #115 — tear down the print DOM (the full-screen #solomd-print-overlay
+      // + `body.solomd-printing`) SYNCHRONOUSLY on error. The old code only
+      // scheduled cleanup via setTimeout in `finally`; if the print invoke
+      // rejected, the editor was left under the print-mode body state and
+      // felt unresponsive ("mouse input dead after an export error" on macOS).
+      cleanup();
       toasts.error(`Print failed: ${e}`);
-    } finally {
-      // The native print sheet is modal; by the time invoke resolves,
-      // the user has already dismissed it. Safe to tear down now.
-      setTimeout(cleanup, 100);
     }
   }
 
@@ -484,23 +610,38 @@ export function useExport() {
     }
   }
 
-  /** Export as PNG image (renders preview, captures with html2canvas). */
+  /**
+   * Export as PNG image (renders preview, captures with html2canvas).
+   * Honors the active editor selection — matches `copyAsImage` so "select
+   * region, save as image" produces an image of *just that region* instead
+   * of the whole document.
+   */
   async function exportImage() {
     track('file_exported', { format: 'image' });
     const ctx = activeOr();
     if (!ctx) return;
-    const filename = `${ctx.baseName}.png`;
+    const sel = getEditorSelectionMd(ctx.content);
+    const source = sel ?? ctx.content;
+    const isSelection = sel !== null;
+    const filename = isSelection
+      ? `${ctx.baseName}-selection.png`
+      : `${ctx.baseName}.png`;
     const path = await pickWritePath(filename, [{ name: 'PNG Image', extensions: ['png'] }]);
     if (!path) return;
-    const tid = toasts.info('Generating image…', 0);
+    const tid = toasts.info(isSelection ? 'Generating selection image…' : 'Generating image…', 0);
     try {
-      const blob = await markdownToImageBlob(ctx.content, ctx.baseName, ctx.filePath, {
+      const blob = await markdownToImageBlob(source, ctx.baseName, ctx.filePath, {
         branding: settings.imageExportBranding,
       });
       const buffer = new Uint8Array(await blob.arrayBuffer());
       await invoke('write_binary_file', { path, data: Array.from(buffer) });
       toasts.dismiss(tid);
-      toasts.success(isIOS() ? iosSavedToast(filename) : 'Exported to PNG image');
+      const msg = isIOS()
+        ? iosSavedToast(filename)
+        : isSelection
+          ? 'Exported selection to PNG image'
+          : 'Exported to PNG image';
+      toasts.success(msg);
     } catch (e) {
       console.error(e);
       toasts.dismiss(tid);
@@ -512,7 +653,7 @@ export function useExport() {
   async function copyAsImage() {
     const ctx = activeOr();
     if (!ctx) return;
-    const sel = getEditorSelectionMd();
+    const sel = getEditorSelectionMd(ctx.content);
     const source = sel ?? ctx.content;
     const isSelection = sel !== null;
     const tid = toasts.info(isSelection ? 'Capturing selection…' : 'Capturing image…', 0);

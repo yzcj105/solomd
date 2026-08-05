@@ -9,13 +9,27 @@
 
 🌐 **[中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt.md) · [Italiano](README.it.md) · [Polski](README.pl.md) · [Nederlands](README.nl.md) · [Türkçe](README.tr.md) · [Svenska](README.sv.md) · [Українська](README.uk.md)** · 🪞 **[Gitee mirror →](https://gitee.com/zhitong45/solomd)** (faster downloads from China)
 
-[**Download v4.0**](https://github.com/zhitongblog/solomd/releases/latest) · [**Launch post**](https://solomd.app/blog/v4-0-0-agent-native-author/) · [**How we built it**](https://solomd.app/blog/v4-0-0-how-we-built-it/) · [**Website**](https://solomd.app) · [**Security**](https://solomd.app/security)
+[**Download the latest release**](https://github.com/zhitongblog/solomd/releases/latest) · [**Launch post**](https://solomd.app/blog/v4-0-0-agent-native-author/) · [**How we built it**](https://solomd.app/blog/v4-0-0-how-we-built-it/) · [**Website**](https://solomd.app) · [**Security**](https://solomd.app/security)
 
 ![SoloMD editor](web/public/demo/solomd-demo.svg)
 
 Your notes live in a folder. **SoloMD is the editor on top — with a first-class agent surface inside the editor, and the MCP endpoint Claude Code / Cursor can drive from outside.** Same `.md` files. Chat with your vault. Schedule recipes that run when you're not at the keyboard. Hand the same vault to any MCP client.
 
 Built on Tauri 2 + Vue 3 + CodeMirror 6. Universal macOS dmg ~32 MB. Free, MIT, no subscription, no SoloMD-hosted servers. Your notes, AI keys, embeddings index, and git history all stay on your machine.
+
+## New in 4.6 — the knowledge-graph layer
+
+The structural half Obsidian and Tolaria had and SoloMD didn't — now built, and on SoloMD's own warm design system:
+
+- **Properties inspector** (`⌘⇧I`) — edit YAML frontmatter with type/date/status/relation pickers; line-surgical writes preserve your comments, inline arrays and quoting byte-for-byte.
+- **Type-driven sidebar** — give a note `type: Project` and its members become a first-class collapsible section with custom icon/colour/columns (types-as-lenses).
+- **Typed relationships** — `belongs_to` / `related_to` / `has` frontmatter with automatic inverses, resolved server-side for big vaults.
+- **Relationship graph** ("Neighborhood") — per-note explorer of outgoing + inverse links; click to navigate, ⌘-click to pivot.
+- **Saved filtered views** — persistent sidebar views (`.solomd/views/*.yml`) with a recursive all/any filter builder (type / status / date / regex).
+- **Inbox workflow** — `⌘E` mark-organized + auto-advance to inbox-zero.
+- **tldraw whiteboards** — Markdown-backed boards (` ```tldraw ` fence), cross-compatible with Tolaria's on-disk format, lazy-loaded so the core stays light.
+
+Plus a **unified macOS title bar** (traffic lights inline in the toolbar) and a from-scratch design-system + Vue component library. Still ~15–32 MB, still free, still local-first. → [Compare vs Obsidian / Typora / Tolaria](https://solomd.app/compare)
 
 ## Three halves of one product
 
@@ -88,6 +102,9 @@ Path-traversal guarded. No network port. The LLM only sees what you point the wo
 
 Latest release: [**v4.0.0**](https://github.com/zhitongblog/solomd/releases/latest).
 
+**System requirements:** Windows 10+, macOS 10.15+, current mainstream Linux, iOS 15+, Android 7+ (API 24).
+Windows 7/8/8.1 cannot be supported — the Rust toolchain requires Windows 10 (since Rust 1.78) and Microsoft froze WebView2 (SoloMD's rendering engine) at version 109 on Windows 7 with no security updates — and no legacy build exists.
+
 ### macOS — universal dmg (Apple Silicon + Intel, signed + notarized)
 
 ```bash
@@ -109,7 +126,6 @@ curl -fsSL https://solomd.app/install.sh | bash
 ### Windows — x64
 
 - [`SoloMD_4.0.0_x64_en-US.msi`](https://github.com/zhitongblog/solomd/releases/latest/download/SoloMD_4.0.0_x64_en-US.msi)
-- [`SoloMD_4.0.0_x64-setup.exe`](https://github.com/zhitongblog/solomd/releases/latest/download/SoloMD_4.0.0_x64-setup.exe) (NSIS)
 - [`SoloMD_4.0.0_x64-portable.zip`](https://github.com/zhitongblog/solomd/releases/latest/download/SoloMD_4.0.0_x64-portable.zip) — no installer
 
 ```powershell
@@ -129,25 +145,48 @@ winget install solomd
 
 [App Store](https://apps.apple.com/app/solomd/id6762498874) — same engine, native iPad UI.
 
+## Marketplaces & integrations
+
+The bundled `solomd-mcp` server runs against any folder of Markdown files — you don't need to install SoloMD itself to drive your vault from Claude / Cursor / Cline / Continue / Zed. Install snippets for each:
+
+| Client | Config snippet |
+|---|---|
+| **Claude Desktop** | [`marketplace/client-docs/claude-desktop.md`](marketplace/client-docs/claude-desktop.md) |
+| **Claude Code** | [`marketplace/client-docs/claude-code.md`](marketplace/client-docs/claude-code.md) |
+| **Cursor** | [`marketplace/client-docs/cursor.md`](marketplace/client-docs/cursor.md) |
+| **Cline** (VS Code) | [`marketplace/client-docs/cline.md`](marketplace/client-docs/cline.md) |
+| **Continue.dev** | [`marketplace/client-docs/continue.md`](marketplace/client-docs/continue.md) |
+| **Zed** | [`marketplace/client-docs/zed.md`](marketplace/client-docs/zed.md) |
+
+Available as:
+
+- **[Skill Pack](https://github.com/zhitongblog/solomd/releases/latest/download/solomd-skills-v4.4.1.zip)** — 11 reference Agent Recipes (weekly review, todo extract, link suggester, …) you can drop into `<vault>/.solomd/agents/`. Ships with every release.
+- **[Claude Code Skill](marketplace/claude-code-skill/)** — `SKILL.md` + `install.sh` that wires `solomd-mcp` into `~/.claude/mcp.json` and exposes the 13 tools to Claude Code with patterns and starter recipes.
+- **Smithery** — `smithery.yaml` + Dockerfile at [`marketplace/smithery/`](marketplace/smithery/) (submission pending).
+- **Awesome MCP Servers** — PR entries for the three biggest community indices (`punkpeye/`, `appcypher/`, `wong2/awesome-mcp-servers`, ~14k forks combined) at [`marketplace/awesome-mcp/`](marketplace/awesome-mcp/).
+
+Full overview + submission status: [`marketplace/README.md`](marketplace/README.md).
+
 ## Compared
 
-| | SoloMD v4.0 | Obsidian | Typora | Tolaria |
+| | SoloMD v4.5 | Obsidian | Typora | Tolaria |
 |---|---|---|---|---|
 | License | **MIT** | proprietary (free) | paid ($14.99) | AGPL |
 | Stack | Tauri 2 (Rust + WebView) | Electron | Electron | Tauri 2 |
-| Platforms | macOS · Win · Linux · iPad | macOS · Win · Linux · iOS · Android | macOS · Win · Linux | macOS · Linux |
+| Platforms | macOS · Win · Linux · **iPad/iOS/Android** | macOS · Win · Linux · iOS · Android | macOS · Win · Linux | macOS · Win · Linux |
 | Installer | ~32 MB (mac) / ~10 MB (win) | ~120 MB | ~95 MB | ~25 MB |
-| **Inline Agent Panel** | **✅ v4.0** | 🟡 paid plugins (Smart Composer / Copilot) | ❌ | 🟡 external MCP only |
+| **Inline Agent Panel** | **✅ v4.0** | 🟡 paid plugins (Smart Composer / Copilot) | ❌ | 🟡 providers + agents, no inline panel |
 | **Scheduled agent recipes** | **✅ v4.0** | ❌ | ❌ | ❌ |
 | **AutoGit branch sandbox + accept/reject** | **✅ v4.0** | ❌ | ❌ | ❌ |
 | **Replayable agent trace** | **✅ v4.0** | ❌ | ❌ | ❌ |
-| **Multi-workspace MCP federation** | **✅ v4.0** | ❌ | ❌ | ❌ |
+| **Multi-workspace** | **✅ v4.0 MCP federation** | ❌ | ❌ | 🟡 multi-vault |
 | **MCP server bundled** | **✅ 13 tools, 5 SoloMD-only** | ❌ (community plugins) | ❌ | ✅ generic |
-| **Built-in AI rewrite** | **✅ 14 BYOK providers** | plugin only | ❌ | via external MCP |
-| GitHub-backed sync | ✅ | ❌ (Obsidian Sync $96/yr) | ❌ | ❌ |
+| **Built-in AI rewrite** | **✅ 14 BYOK providers** | plugin only | ❌ | ✅ built-in providers |
+| GitHub-backed sync | ✅ | ❌ (Obsidian Sync $5/mo) | ❌ | ❌ |
 | End-to-end encryption | ✅ on your repo | ✅ on Obsidian's servers | ❌ | ❌ |
 | Local RAG / semantic search | ✅ off by default | plugin only | ❌ | ❌ |
 | Version history per note | ✅ AutoGit | plugin only | ❌ | ✅ |
+| Markdown whiteboards (tldraw) | ❌ | 🟡 Canvas (own format) | ❌ | ✅ |
 | CJK encodings (GBK / Big5) | ✅ auto-detect | ❌ | ❌ | ❌ |
 
 Detailed breakdowns: [vs Obsidian](https://solomd.app/compare/vs-obsidian) · [vs Typora](https://solomd.app/compare/vs-typora) · [vs Tolaria](https://solomd.app/compare/vs-tolaria) · [vs Marktext](https://solomd.app/compare/vs-marktext).
@@ -196,5 +235,3 @@ One maintainer, two front doors. Async on [GitHub Discussions](https://github.co
 ## License & credits
 
 [MIT](LICENSE) © 2026 xiangdong li. SoloMD stands on Tauri 2, Vue 3, CodeMirror 6, markdown-it, KaTeX, Mermaid, libgit2, Pandoc, Hunspell, `keyring-rs`, and `rmcp`. Sponsor on [GitHub Sponsors](https://github.com/sponsors/zhitongblog) or via [solomd.app/#sponsor](https://solomd.app/#sponsor).
-</content>
-</invoke>

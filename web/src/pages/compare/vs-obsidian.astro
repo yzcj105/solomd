@@ -2,8 +2,27 @@
 import Layout from '../../layouts/Layout.astro';
 import Header from '../../components/Header.astro';
 import Footer from '../../components/Footer.astro';
+import CompareFaq from '../../components/CompareFaq.astro';
 
 const lang = 'en' as const;
+const FAQ = [
+  {
+    q: 'Can SoloMD replace Obsidian?',
+    a: 'If your workflow is notes, wiki links, backlinks, daily writing and a knowledge graph, yes — SoloMD ships all of that in core, including typed relationships with automatic inverses, a per-note relationship graph, saved filtered views, and a properties inspector. If you depend on Obsidian’s community-plugin ecosystem, no: SoloMD deliberately has no plugin marketplace — every feature ships built in.',
+  },
+  {
+    q: 'Do [[wiki links]] and backlinks work in SoloMD?',
+    a: 'Yes. [[note]] wiki links with autocomplete, an outline panel, a backlinks panel, plus typed relationships (belongs_to / related_to / has in frontmatter) and a “Neighborhood” graph you can walk hop by hop. Everything is stored as plain .md and YAML — your notes stay portable.',
+  },
+  {
+    q: 'How does sync work without a subscription?',
+    a: 'SoloMD is folder-based, so any file sync works for free: iCloud, Dropbox, OneDrive, Syncthing. It also has built-in GitHub sync (your own repo, libgit2, optional end-to-end encryption). There is no account and no paid sync tier; Obsidian Sync costs $5/month.',
+  },
+  {
+    q: 'How much lighter is SoloMD than Obsidian?',
+    a: 'The installer is ~15 MB versus ~110 MB for Obsidian, and idle memory is roughly 80–150 MB. SoloMD is built on Tauri 2 with a Rust backend rather than Electron.',
+  },
+];
 ---
 
 <Layout
@@ -28,11 +47,11 @@ const lang = 'en' as const;
       <h2>Quick verdict</h2>
       <table class="compare-detail">
         <thead>
-          <tr><th>&nbsp;</th><th>SoloMD v4.0</th><th>Obsidian 1.x</th></tr>
+          <tr><th>&nbsp;</th><th>SoloMD v4.11</th><th>Obsidian 1.x</th></tr>
         </thead>
         <tbody>
           <tr><th>Mental model</th><td>Document editor + agent surface + AI / search / history toolkit</td><td>Vault / knowledge base + plugin marketplace</td></tr>
-          <tr><th>Price</th><td><strong>Free</strong> (MIT)</td><td>Free personal · $50/yr commercial · $96/yr Sync</td></tr>
+          <tr><th>Price</th><td><strong>Free</strong> (MIT)</td><td>Free incl. commercial (since Feb 2025) · optional Sync $5/mo · Publish $10/mo</td></tr>
           <tr><th>Open source</th><td>✅</td><td>❌ core closed; plugins open</td></tr>
           <tr><th>Installer size</th><td>~15 MB</td><td>~130 MB</td></tr>
           <tr><th>RAM at idle</th><td>~150 MB</td><td>~400 MB</td></tr>
@@ -55,7 +74,7 @@ const lang = 'en' as const;
           <tr><th>Wiki-style links</th><td>✅ <strong>v2.0</strong> · <code>[[file]]</code></td><td>✅ <code>[[file]]</code></td></tr>
           <tr><th>Works with single files</th><td>✅ open any .md</td><td>⚠️ prefers a vault folder</td></tr>
           <tr><th>Multi-encoding (GBK/Big5)</th><td>✅</td><td>⚠️ UTF-8 only</td></tr>
-          <tr><th>iPad</th><td>🟡 submitted, in review</td><td>✅ App Store</td></tr>
+          <tr><th>iPad / iOS / Android</th><td>✅ App Store (iPad/iOS) + Android</td><td>✅ App Store + Android</td></tr>
           <tr><th>Vim mode</th><td>✅</td><td>✅ core plugin</td></tr>
           <tr><th>Slideshow / presentation</th><td>✅ <code>⌘⌥P</code> built-in</td><td>🟡 Slides plugin</td></tr>
           <tr><th>CLI tool</th><td>✅ <code>solomd</code></td><td>❌</td></tr>
@@ -129,6 +148,8 @@ const lang = 'en' as const;
         <a href="https://obsidian.md/commercial-license" rel="external">$50/user/year</a>
         for commercial use in teams of ≥2.
       </p>
+
+      <CompareFaq heading="Frequently asked questions" items={FAQ} />
 
       <div class="compare-cta">
         <a href="/#download" class="btn btn--primary">Download SoloMD</a>

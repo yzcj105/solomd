@@ -167,20 +167,23 @@ function renderPopup(view: EditorView, initial: SlashState): TooltipView {
 
   let lastQuery = '<NEVER>';
   let lastSelectedIndex = -1;
+  let rowEls: HTMLDivElement[] = [];
 
-  const repaint = (s: SlashState) => {
-    const filtered = filterBlocks(SLASH_BLOCKS, s.query);
-    if (s.query === lastQuery && s.selectedIndex === lastSelectedIndex) {
-      return;
-    }
-    lastQuery = s.query;
-    lastSelectedIndex = clampIndex(s.selectedIndex, filtered.length);
+  /**
+   * Build the row DOM ONCE per filter-result change. Selected-index updates
+   * (the keyboard hot path) just toggle the active class on the existing
+   * rows so synthetic mouseenter events don't fire under a stationary
+   * cursor (issue #80). The active row also scrollIntoView so users can
+   * see what's highlighted when the list is taller than the popup.
+   */
+  const rebuildRows = (filtered: SlashBlock[]) => {
     root.replaceChildren();
+    rowEls = [];
 
     if (filtered.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'cm-slash-empty';
-      empty.textContent = emptyHintFor(s.query);
+      empty.textContent = emptyHintFor(lastQuery);
       root.appendChild(empty);
       return;
     }
@@ -188,10 +191,8 @@ function renderPopup(view: EditorView, initial: SlashState): TooltipView {
     filtered.forEach((b, i) => {
       const row = document.createElement('div');
       row.className = 'cm-slash-row';
-      if (i === lastSelectedIndex) row.classList.add('cm-slash-row--active');
       row.setAttribute('role', 'option');
       row.setAttribute('data-id', b.id);
-      row.setAttribute('aria-selected', i === lastSelectedIndex ? 'true' : 'false');
 
       const icon = document.createElement('span');
       icon.className = 'cm-slash-icon';
@@ -217,7 +218,15 @@ function renderPopup(view: EditorView, initial: SlashState): TooltipView {
         if (!cur) return;
         insertBlock(view, cur, b);
       });
-      row.addEventListener('mouseenter', () => {
+      row.addEventListener('mousemove', () => {
+        // v4.5.x issue #93 — use mousemove (not mouseenter) so that
+        // wheel-scrolling the popup doesn't hijack the selection. With
+        // mouseenter, rows moving under a stationary cursor during a
+        // scroll fire synthetic enter events and the highlight jumps
+        // around. mousemove only fires on real pointer movement, so
+        // scrolling stays smooth while genuine hover still updates the
+        // selection — the "mouse hover updates selection" UX users
+        // expect. (Same fix applied to CommandPalette.vue in f5f47a8.)
         const cur = view.state.field(slashStateField, false);
         if (!cur) return;
         view.dispatch({
@@ -226,7 +235,39 @@ function renderPopup(view: EditorView, initial: SlashState): TooltipView {
       });
 
       root.appendChild(row);
+      rowEls.push(row);
     });
+  };
+
+  const setActive = (idx: number) => {
+    for (let i = 0; i < rowEls.length; i++) {
+      const active = i === idx;
+      rowEls[i].classList.toggle('cm-slash-row--active', active);
+      rowEls[i].setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        // v4.3.x issue #80 — keep the highlighted row in view when the
+        // user pages through a list taller than the popup. `nearest`
+        // scrolls only when needed (avoids jitter on every keystroke).
+        rowEls[i].scrollIntoView({ block: 'nearest' });
+      }
+    }
+  };
+
+  const repaint = (s: SlashState) => {
+    const filtered = filterBlocks(SLASH_BLOCKS, s.query);
+    const clamped = clampIndex(s.selectedIndex, filtered.length);
+    const queryChanged = s.query !== lastQuery;
+    const indexChanged = clamped !== lastSelectedIndex;
+    if (!queryChanged && !indexChanged) return;
+    if (queryChanged) {
+      lastQuery = s.query;
+      rebuildRows(filtered);
+      // The new list of rows means we have to re-apply the active class.
+      setActive(clamped);
+    } else {
+      setActive(clamped);
+    }
+    lastSelectedIndex = clamped;
   };
 
   repaint(initial);
@@ -245,6 +286,7 @@ function renderPopup(view: EditorView, initial: SlashState): TooltipView {
     destroy: () => {
       lastQuery = '<NEVER>';
       lastSelectedIndex = -1;
+      rowEls = [];
     },
   };
 }

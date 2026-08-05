@@ -2,8 +2,54 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod runner;
+mod windows_install_migration;
+
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_APP_USER_MODEL_ID: &str = "app.solomd";
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_app_user_model_id_wide() -> Vec<u16> {
+    WINDOWS_APP_USER_MODEL_ID
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_app_user_model_id() {
+    let app_id = windows_app_user_model_id_wide();
+    unsafe {
+        let _ = windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+            app_id.as_ptr(),
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_windows_app_user_model_id() {}
 
 fn main() {
+    // v4.11.7: the MSI in Program Files is now the only installed Windows
+    // channel. If this user still has the retired per-user NSIS build, let its
+    // own uninstaller remove only that legacy installation before any UI opens.
+    windows_install_migration::migrate_legacy_nsis_install();
+
+    // Keep the running process on the same stable Windows identity as the MSI
+    // shortcuts. Taskbar pins and icon caches use this identity across upgrades.
+    set_windows_app_user_model_id();
+
+    // Linux (#158): webkit2gtk 2.42+ uses a DMABUF renderer that fails to
+    // obtain an EGL display on some GPU / Mesa combinations (e.g. Intel on
+    // older ThinkPads), aborting at launch with
+    //   "Could not create default EGL display: EGL_BAD_PARAMETER. Aborting..."
+    // before any window appears. Disabling the DMABUF renderer falls back to a
+    // working GL path and is the upstream-recommended workaround. Set it before
+    // webkit initialises, and only when the user hasn't chosen their own value.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     let initial_file: Option<String> = std::env::args()
         .skip(1)
         .find(|a| !a.starts_with('-'))
@@ -41,4 +87,27 @@ fn main() {
     let _guard = rt.enter();
 
     runner::run_with(initial_file);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_app_id_matches_tauri_bundle_identifier() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
+
+        assert_eq!(
+            config["identifier"].as_str(),
+            Some(WINDOWS_APP_USER_MODEL_ID)
+        );
+
+        let wide = windows_app_user_model_id_wide();
+        assert_eq!(wide.last(), Some(&0));
+        assert_eq!(
+            wide[..wide.len() - 1],
+            WINDOWS_APP_USER_MODEL_ID.encode_utf16().collect::<Vec<_>>()
+        );
+    }
 }

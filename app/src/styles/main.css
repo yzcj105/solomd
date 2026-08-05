@@ -1,23 +1,49 @@
 /* SoloMD brand styles + theme variables */
 
+/* v4.6 design-token layer. Imported FIRST so main.css + the 8 named themes
+ * cascade after it and win where they must. See styles/tokens.css. */
+@import "./tokens.css";
+
 :root {
+  /* v4.3.0 issue #78 — tell native form controls (most importantly
+     <select>) to render in the LIGHT palette by default. Without this,
+     webkit2gtk on KDE6 / Linux delegates select rendering to the system
+     theme, which on user's Plasma 6 dark setup painted the selected
+     text in a near-invisible color over our dark UI background. macOS
+     / Windows webviews honor `color-scheme` too and switch their form
+     widget palettes accordingly. Dark themes override this below. */
+  color-scheme: light;
+
   /* brand */
   --brand-bg: #000000;
   --brand-fg: #ffffff;
   --brand-accent: #ff9f40;
 
-  /* light theme (default) */
-  --bg: #fafaf7;
-  --bg-elev: #ffffff;
+  /* light theme (default) — v4.6 warm-neutral surfaces (plan §2.4).
+     --bg / --bg-elev / --border / --text / --text-muted are seeded in
+     tokens.css; re-stated here so the cascade order stays explicit and
+     legible. --bg-hover / --bg-active / --text-faint stay SoloMD-tuned. */
+  --bg: #ffffff;
+  --bg-elev: #f7f6f3;
   --bg-hover: #f0eee8;
   --bg-active: #ebe9e2;
-  --border: #e5e3dc;
-  --text: #1a1a1a;
-  --text-muted: #8a8a8a;
-  --text-faint: #b8b6ad;
+  --border: #e9e9e7;
+  --text: #37352f;
+  --text-muted: #787774;
+  --text-faint: #b4b4b4;
   --accent: #ff9f40;
   --accent-fg: #1a1a1a;
   --danger: #d64545;
+
+  /* v4.6 F2 — type-section accent palette (types-as-lenses). Six fixed
+     hues so a type's `color:` key tints its sidebar section consistently
+     across themes. Light values here; dark overrides below. */
+  --type-orange: #d9831f;
+  --type-red: #d64545;
+  --type-purple: #8b5cd6;
+  --type-blue: #2f7fd4;
+  --type-green: #3a9d4e;
+  --type-yellow: #c9a227;
 
   /* Markdown element colors (light) */
   --md-h1: #1a1a1a;
@@ -74,16 +100,27 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #1a1a1a;
-  --bg-elev: #232323;
+  color-scheme: dark;
+  /* v4.6 warm-neutral dark surfaces (plan §2.4) — warm black, not pure #000 */
+  --bg: #1f1e1b;
+  --bg-elev: #23221f;
   --bg-hover: #2a2a2a;
   --bg-active: #333333;
-  --border: #333333;
-  --text: #f0f0ed;
-  --text-muted: #8a8a8a;
-  --text-faint: #555;
-  --accent: #ff9f40;
+  --border: #34322d;
+  --text: #e6e1d8;
+  --text-muted: #b8b1a6;
+  --text-faint: #7f776d;
+  --accent: #ffa54d;
   --accent-fg: #1a1a1a;
+
+  /* v4.6 F2 — type-section accent palette (dark, slightly lifted for
+     contrast on the dark sidebar background). */
+  --type-orange: #f0a64a;
+  --type-red: #e86d6d;
+  --type-purple: #b18cf0;
+  --type-blue: #6bb0f0;
+  --type-green: #6cc77f;
+  --type-yellow: #e0c350;
 
   /* Markdown element colors (dark) */
   --md-h1: #ffffff;
@@ -116,6 +153,7 @@
 
 /* ---- Nord ---- */
 :root[data-theme="nord"] {
+  color-scheme: dark;
   --bg: #2e3440;
   --bg-elev: #3b4252;
   --bg-hover: #434c5e;
@@ -160,6 +198,7 @@
 
 /* ---- Solarized Dark ---- */
 :root[data-theme="solarized-dark"] {
+  color-scheme: dark;
   --bg: #002b36;
   --bg-elev: #073642;
   --bg-hover: #0a4050;
@@ -182,6 +221,7 @@
 
 /* ---- Monokai ---- */
 :root[data-theme="monokai"] {
+  color-scheme: dark;
   --bg: #272822;
   --bg-elev: #3e3d32;
   --bg-hover: #49483e;
@@ -226,6 +266,7 @@
 
 /* ---- Dracula ---- */
 :root[data-theme="dracula"] {
+  color-scheme: dark;
   --bg: #282a36;
   --bg-elev: #44475a;
   --bg-hover: #4e5172;
@@ -255,8 +296,15 @@ body,
 #app {
   margin: 0;
   padding: 0;
-  height: 100vh;
-  width: 100vw;
+  /* #125 — use 100% (not 100vw/100vh). The app-wide zoom sets
+     `documentElement.style.zoom`; `vw`/`vh` do NOT divide by zoom, so at
+     zoom 1.3 the root rendered ~30% wider than the window — pushing
+     right-anchored chrome (e.g. the reading-mode ✕) off-screen and making the
+     view shake as it overflowed. `100%` resolves against the real (zoomed)
+     viewport, so the layout always fits. Verified in Chromium: 100vw@1.3 →
+     scrollWidth 1872 vs window 1440 (overflow); 100%@1.3 → 1440 (fits). */
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -382,6 +430,33 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
+/* GitHub-style callouts (> [!NOTE] …) — global so preview, live-edit blocks
+   and the print overlay all pick them up. Label text comes from ::before so
+   it never pollutes copy/paste of the body. */
+.md-callout {
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  padding: 10px 14px;
+  margin: 0.8em 0;
+}
+.md-callout::before {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9em;
+  margin-bottom: 4px;
+}
+.md-callout--note { border-left-color: #316dca; }
+.md-callout--note::before { content: 'ℹ️ Note'; color: #316dca; }
+.md-callout--tip { border-left-color: #347d39; }
+.md-callout--tip::before { content: '💡 Tip'; color: #347d39; }
+.md-callout--important { border-left-color: #8256d0; }
+.md-callout--important::before { content: '❗ Important'; color: #8256d0; }
+.md-callout--warning { border-left-color: #a8750a; }
+.md-callout--warning::before { content: '⚠️ Warning'; color: #a8750a; }
+.md-callout--caution { border-left-color: #c93c37; }
+.md-callout--caution::before { content: '🛑 Caution'; color: #c93c37; }
+
 .contains-task-list {
   list-style: none;
   padding-left: 1.25rem;
@@ -433,6 +508,15 @@ mark {
   body.solomd-printing #solomd-print-overlay {
     display: block !important;
     position: static !important;
+  }
+  /* #178: paper can't scroll — always wrap code lines in print/PDF so
+   * anything wider than the page isn't silently cut off. Applies
+   * regardless of the on-screen codeBlockWrap setting. */
+  body.solomd-printing .solomd-print-content pre {
+    white-space: pre-wrap !important;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    overflow-x: visible !important;
   }
 }
 /* On-screen the overlay must be invisible — @media print flips it. */

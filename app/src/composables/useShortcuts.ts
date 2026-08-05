@@ -36,6 +36,18 @@ export function useShortcuts(hooks: Hooks = {}) {
     if (cmd) cmd.run();
   }
 
+  /** #106 — cycle the focused pane to the previous/next tab in the bar.
+   *  Routes through tiles.setActiveTab so the pane's activeTabId stays in
+   *  lock-step with tabs.activeId (the same path a click takes). Wraps
+   *  around the ends so the shortcut never dead-ends. */
+  function activateTabByOffset(offset: 1 | -1) {
+    const list = tabs.tabs;
+    if (list.length < 2) return;
+    const cur = list.findIndex((t) => t.id === tabs.activeId);
+    const idx = cur < 0 ? 0 : (cur + offset + list.length) % list.length;
+    tiles.setActiveTab(tiles.focusedPaneId, list[idx].id);
+  }
+
   function handler(e: KeyboardEvent) {
     // F1 (no modifier) opens markdown help
     if (e.key === 'F1') {
@@ -117,6 +129,10 @@ export function useShortcuts(hooks: Hooks = {}) {
     } else if (k === 'k' && e.shiftKey) {
       e.preventDefault();
       hooks.openPalette?.();
+    } else if (k === 'i' && e.shiftKey) {
+      // v4.6 F1: ⌘⇧I toggles the Properties inspector (frontmatter editor).
+      e.preventDefault();
+      settings.toggleInspector();
     } else if (k === 'j' && e.shiftKey) {
       // v2.5 F6: ⌘⇧J — CJK proofread panel. Shift differentiates from
       // ⌘J (CodeMirror "AI rewrite", bound inside the editor keymap).
@@ -155,8 +171,17 @@ export function useShortcuts(hooks: Hooks = {}) {
       runById('daily.openToday');
     } else if (k === 'e' && !e.shiftKey && !e.altKey) {
       // v2.4: ⌘E toggles `inbox: true|false` in the active doc's front matter.
+      // v4.6 F6: route through organizeAndAdvance — inside the inbox context
+      // (InboxView open / inbox filter on) with auto-advance enabled this
+      // marks the note organized and jumps to the next inbox note; everywhere
+      // else it degrades to the plain toggle. Disabled entirely when the
+      // workflow is opted out.
       e.preventDefault();
-      inbox.toggleActive();
+      if (settings.inboxWorkflowEnabled) {
+        void inbox.organizeAndAdvance();
+      } else {
+        inbox.toggleActive();
+      }
     } else if (k === 'z' && e.shiftKey && !e.altKey) {
       // v2.5 F4: ⌘⇧Z = "Zen" — start the last-used preset (or the
       // settings default if no last-used). If a session is already
@@ -168,6 +193,19 @@ export function useShortcuts(hooks: Hooks = {}) {
         const min = Number.isFinite(last) && last > 0 ? last : settings.pomodoroDefaultMinutes;
         pomodoro.start(min, { notify: true });
       }
+    }
+
+    // #106 — ⌘[ / ⌘] cycle to the previous / next tab (Chrome/VSCode muscle
+    // memory). Matched on e.key so it's keyboard-layout precise.
+    if (e.key === '[') {
+      e.preventDefault();
+      activateTabByOffset(-1);
+      return;
+    }
+    if (e.key === ']') {
+      e.preventDefault();
+      activateTabByOffset(1);
+      return;
     }
 
     // Tile layout shortcuts

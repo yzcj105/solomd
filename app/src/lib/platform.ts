@@ -16,8 +16,52 @@ export function isIOS(): boolean {
   return false;
 }
 
+export function isAndroid(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android/i.test(navigator.userAgent || '');
+}
+
+/**
+ * True when running on a macOS desktop WebView (not iOS / iPadOS).
+ *
+ * We only want this to gate the unified-titlebar treatment: on macOS the
+ * window uses `titleBarStyle: "Overlay"` (tauri.conf) which floats the
+ * traffic-light buttons over our toolbar, so the toolbar must reserve ~72px
+ * of left padding for them and become a `data-tauri-drag-region`. Windows /
+ * Linux keep native decorations and must NOT get that padding; iOS has no
+ * window chrome at all. WKWebView on iPad reports "Macintosh" in its UA, so
+ * we explicitly exclude the touch-capable iOS case via `isIOS()`.
+ */
+export function isMacOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  if (isIOS()) return false;
+  const ua = navigator.userAgent || '';
+  return /Macintosh|Mac OS X/.test(ua);
+}
+
 export function isMobile(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
   return isIOS() || /Android/i.test(ua);
+}
+
+/** Windows desktop editor detection, including the forcePlain QA hook. */
+export function isWindowsEditorRuntime(): boolean {
+  return (
+    (typeof navigator !== 'undefined' && /Win/i.test(navigator.platform)) ||
+    (typeof location !== 'undefined' && location.search.includes('forcePlain'))
+  );
+}
+
+/**
+ * Windows falls back to the native textarea for reliable CJK IME input, but
+ * Vim is a CodeMirror extension and therefore requires the CodeMirror editor.
+ * Keep this decision pure so the Windows/Vim hand-off can be regression tested
+ * without booting a platform WebView.
+ */
+export function shouldUsePlainWindowsEditor(
+  windowsRuntime: boolean,
+  vimMode: boolean,
+): boolean {
+  return windowsRuntime && !vimMode;
 }

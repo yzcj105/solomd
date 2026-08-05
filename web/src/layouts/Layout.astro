@@ -6,12 +6,16 @@ interface Props {
   title?: string;
   description?: string;
   lang?: Lang;
+  /** Pages that must never be indexed (404, admin). Suppresses canonical +
+      hreflang too — a 404 pointing canonical at `/` is how soft-404s start. */
+  noindex?: boolean;
 }
 
 const {
   title = 'SoloMD — Lightweight Markdown editor',
   description = 'A lightweight, cross-platform Markdown + plain text editor.',
   lang = 'en',
+  noindex = false,
 } = Astro.props;
 
 const HTML_LANG = { en: 'en', zh: 'zh-CN', ja: 'ja', ko: 'ko', de: 'de', fr: 'fr', es: 'es', pt: 'pt', it: 'it', pl: 'pl', nl: 'nl', tr: 'tr', sv: 'sv', uk: 'uk' } as const;
@@ -19,6 +23,7 @@ const OG_LOCALE = { en: 'en_US', zh: 'zh_CN', ja: 'ja_JP', ko: 'ko_KR', de: 'de_
 const htmlLang = HTML_LANG[lang];
 const path = lang === 'en' ? '/' : `/${lang}/`;
 const ogLocale = OG_LOCALE[lang];
+const ogImage = lang === 'zh' ? 'https://solomd.app/og-image-zh.png' : 'https://solomd.app/og-image.png';
 ---
 
 <!doctype html>
@@ -30,22 +35,28 @@ const ogLocale = OG_LOCALE[lang];
     <title>{title}</title>
     <meta name="description" content={description} />
 
-    <link rel="alternate" hreflang="en" href="https://solomd.app/" />
-    <link rel="alternate" hreflang="zh-CN" href="https://solomd.app/zh/" />
-    <link rel="alternate" hreflang="ja" href="https://solomd.app/ja/" />
-    <link rel="alternate" hreflang="ko" href="https://solomd.app/ko/" />
-    <link rel="alternate" hreflang="de" href="https://solomd.app/de/" />
-    <link rel="alternate" hreflang="fr" href="https://solomd.app/fr/" />
-    <link rel="alternate" hreflang="es" href="https://solomd.app/es/" />
-    <link rel="alternate" hreflang="pt" href="https://solomd.app/pt/" />
-    <link rel="alternate" hreflang="it" href="https://solomd.app/it/" />
-    <link rel="alternate" hreflang="pl" href="https://solomd.app/pl/" />
-    <link rel="alternate" hreflang="nl" href="https://solomd.app/nl/" />
-    <link rel="alternate" hreflang="tr" href="https://solomd.app/tr/" />
-    <link rel="alternate" hreflang="sv" href="https://solomd.app/sv/" />
-    <link rel="alternate" hreflang="uk" href="https://solomd.app/uk/" />
-    <link rel="alternate" hreflang="x-default" href="https://solomd.app/" />
-    <link rel="canonical" href={`https://solomd.app${path}`} />
+    {noindex ? (
+      <meta name="robots" content="noindex, follow" />
+    ) : (
+      <>
+        <link rel="alternate" hreflang="en" href="https://solomd.app/" />
+        <link rel="alternate" hreflang="zh-CN" href="https://solomd.app/zh/" />
+        <link rel="alternate" hreflang="ja" href="https://solomd.app/ja/" />
+        <link rel="alternate" hreflang="ko" href="https://solomd.app/ko/" />
+        <link rel="alternate" hreflang="de" href="https://solomd.app/de/" />
+        <link rel="alternate" hreflang="fr" href="https://solomd.app/fr/" />
+        <link rel="alternate" hreflang="es" href="https://solomd.app/es/" />
+        <link rel="alternate" hreflang="pt" href="https://solomd.app/pt/" />
+        <link rel="alternate" hreflang="it" href="https://solomd.app/it/" />
+        <link rel="alternate" hreflang="pl" href="https://solomd.app/pl/" />
+        <link rel="alternate" hreflang="nl" href="https://solomd.app/nl/" />
+        <link rel="alternate" hreflang="tr" href="https://solomd.app/tr/" />
+        <link rel="alternate" hreflang="sv" href="https://solomd.app/sv/" />
+        <link rel="alternate" hreflang="uk" href="https://solomd.app/uk/" />
+        <link rel="alternate" hreflang="x-default" href="https://solomd.app/" />
+        <link rel="canonical" href={`https://solomd.app${path}`} />
+      </>
+    )}
 
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
@@ -54,7 +65,7 @@ const ogLocale = OG_LOCALE[lang];
     <meta property="og:url" content={`https://solomd.app${path}`} />
     <meta property="og:site_name" content="SoloMD" />
     <meta property="og:locale" content={ogLocale} />
-    <meta property="og:image" content="https://solomd.app/og-image.png" />
+    <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />
@@ -63,12 +74,12 @@ const ogLocale = OG_LOCALE[lang];
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://solomd.app/og-image.png" />
+    <meta name="twitter:image" content={ogImage} />
 
     <meta name="theme-color" content="#ff9f40" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0e0e0c" media="(prefers-color-scheme: dark)" />
 
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.svg?v=4.11.4" type="image/svg+xml" />
 
     <!-- Marketing-site display serif. Source Serif 4 by Adobe, OFL — used
          only on /landing and /blog headings; the desktop app does not
@@ -109,13 +120,15 @@ const ogLocale = OG_LOCALE[lang];
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "SoloMD",
-      "alternateName": ["#MD", "Solo MD"],
-      "description": "Free, open-source Markdown editor for macOS, Windows, Linux, Android, and iOS. ~15 MB installer, MIT license, offline-first, no accounts, no in-app purchases, no ads. Ships live preview, Wiki links, local RAG, 14 BYOK AI providers, themes, AutoGit, MCP server, and Pomodoro in core.",
+      "alternateName": ["#MD", "Solo MD", "free Typora alternative", "open-source Obsidian alternative"],
+      "description": "Free, open-source Markdown editor for macOS, Windows, Linux, Android, and iOS — a free alternative to Typora with the same live WYSIWYG preview, and an open-source alternative to Obsidian for local, folder-based notes. ~15 MB installer, MIT license, offline-first, no accounts, no in-app purchases, no ads. Ships live preview, Wiki links, local RAG, 14 BYOK AI providers, themes, AutoGit, MCP server, and Pomodoro in core.",
       "applicationCategory": "ProductivityApplication",
       "applicationSubCategory": "Markdown Editor",
       "operatingSystem": "macOS, Windows, Linux, Android, iOS",
-      "softwareVersion": "4.2.0",
+      "softwareVersion": "4.11.9",
       "datePublished": "2026-05-17",
+      "dateModified": "2026-08-03",
+      "releaseNotes": "https://solomd.app/whats-new/",
       "fileSize": "15MB",
       "url": "https://solomd.app",
       "downloadUrl": "https://github.com/zhitongblog/solomd/releases/latest",
@@ -138,6 +151,12 @@ const ogLocale = OG_LOCALE[lang];
       },
       "featureList": [
         "Live Preview Markdown editor (Typora-style WYSIWYG)",
+        "Native-textarea block editor on Windows — reliable CJK IME input (avoids WebView2 contentEditable bugs)",
+        "tldraw whiteboards embedded in Markdown (```tldraw fence)",
+        "Knowledge graph: typed relationships with automatic inverses, per-note Neighborhood graph, type-driven sidebar",
+        "Properties inspector — frontmatter editor with date / relation / status / tag pickers",
+        "Saved filtered views (.solomd/views/*.yml) in the sidebar",
+        "Image hosting upload (图床) — PicGo, custom command, SM.MS, S3-compatible, GitHub CDN",
         "Wiki links with outline + backlinks panel",
         "Local RAG / semantic search (on-device embedder, zero cloud calls)",
         "14 BYOK AI providers — OpenAI, Claude, Gemini, xAI, Mistral, Groq, DeepSeek, Qwen, GLM, Kimi, Doubao, SiliconFlow, OpenRouter, Ollama",
@@ -182,14 +201,14 @@ const ogLocale = OG_LOCALE[lang];
           "@type": "HowToStep",
           "position": 2,
           "name": "Windows — one-line install",
-          "text": "Open PowerShell and run: irm https://solomd.app/install.ps1 | iex. Downloads SoloMD_4.2.0_x64_en-US.msi from GitHub Releases and runs the installer.",
+          "text": "Open PowerShell and run: irm https://solomd.app/install.ps1 | iex. Downloads SoloMD_4.11.9_x64_en-US.msi from GitHub Releases and runs the installer.",
           "url": "https://solomd.app/install.ps1",
         },
         {
           "@type": "HowToStep",
           "position": 3,
           "name": "Android — sideload or Play Store",
-          "text": "Download SoloMD_4.2.0_universal.apk from https://github.com/zhitongblog/solomd/releases/latest and tap to install (Settings → enable Install from Unknown Sources). Or join the closed Play Store beta by emailing lixd220@gmail.com.",
+          "text": "Download SoloMD_4.11.9_universal.apk from https://github.com/zhitongblog/solomd/releases/latest and tap to install (Settings → enable Install from Unknown Sources). Or join the Play Store beta: join the group at groups.google.com/g/solomd-android-testers, then opt in at play.google.com/apps/testing/app.solomd.",
           "url": "https://github.com/zhitongblog/solomd/releases/latest",
         },
         {

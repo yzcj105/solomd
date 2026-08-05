@@ -3,17 +3,30 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import mermaid from 'mermaid';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { renderMarkdown, extractImageRoot } from '../lib/markdown';
-import { rewriteImageUrls } from '../lib/image-resolve';
+import { plantumlSvgUrl } from '../lib/plantuml';
+import { installSvgImageFallbacks, rewriteImageUrls } from '../lib/image-resolve';
 import { openImageOverlay, type OverlayStrings } from '../lib/image-overlay';
+import { svgToPngBlob, diagramBackground } from '../lib/mermaid-export';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+import { useToastsStore } from '../stores/toasts';
 import { useI18n } from '../i18n';
 import { useSettingsStore } from '../stores/settings';
+import { useTabsStore } from '../stores/tabs';
 import { useFiles } from '../composables/useFiles';
 import PreviewSearch from './PreviewSearch.vue';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 const props = withDefaults(
   defineProps<{
     source: string;
     filePath?: string;
+    /**
+     * v4.6 — id of the tab this preview renders. Needed to write back edits
+     * (editable display-math) to the right tab via the store. Omitted in
+     * read-only contexts (e.g. Slideshow), which disables in-place editing.
+     */
+    tabId?: string;
     /**
      * v2.4: which "skin" the rendered prose should use.
      *  - `default` — the standard editor preview pane (constrained max-width
@@ -26,20 +39,146 @@ const props = withDefaults(
   { skin: 'default' },
 );
 const settings = useSettingsStore();
+const tabs = useTabsStore();
 const files = useFiles();
 const { t } = useI18n();
 const host = ref<HTMLDivElement | null>(null);
 const searchOpen = ref(false);
 const searchRef = ref<InstanceType<typeof PreviewSearch> | null>(null);
 
+// ── Editable display math (double-click a $$…$$ formula to edit its LaTeX) ──
+const mathEdit = ref<
+  null | { fromLine: number; toLine: number; top: number; left: number; width: number }
+>(null);
+const mathDraft = ref('');
+const mathTextarea = ref<HTMLTextAreaElement | null>(null);
+
+/**
+ * Locate the `$$…$$` block whose opening `$$` is at/near 1-indexed `startLine`
+ * and return its 0-indexed inclusive line range plus the inner LaTeX.
+ */
+function findMathBlock(
+  source: string,
+  startLine: number,
+): { from: number; to: number; latex: string } | null {
+  const lines = source.split('\n');
+  let openIdx = -1;
+  for (let k = startLine - 1; k >= 0 && k < Math.min(lines.length, startLine + 1); k++) {
+    if (k >= 0 && lines[k]?.includes('$$')) { openIdx = k; break; }
+  }
+  if (openIdx === -1) return null;
+  const openLine = lines[openIdx];
+  const openPos = openLine.indexOf('$$');
+  const afterOpen = openLine.slice(openPos + 2);
+  // Single-line: $$ latex $$
+  const sameClose = afterOpen.indexOf('$$');
+  if (sameClose !== -1) {
+    return { from: openIdx, to: openIdx, latex: afterOpen.slice(0, sameClose).trim() };
+  }
+  // Multi-line: find the closing $$
+  let closeIdx = -1;
+  for (let k = openIdx + 1; k < lines.length; k++) {
+    if (lines[k].includes('$$')) { closeIdx = k; break; }
+  }
+  if (closeIdx === -1) return null;
+  const closeLine = lines[closeIdx];
+  const tail = closeLine.slice(0, closeLine.indexOf('$$'));
+  const latex = [afterOpen, ...lines.slice(openIdx + 1, closeIdx), tail]
+    .join('\n')
+    .replace(/^\s*\n|\n\s*$/g, '')
+    .trim();
+  return { from: openIdx, to: closeIdx, latex };
+}
+
+function onPreviewDblClick(e: MouseEvent) {
+  if (!props.tabId) return;
+  const block = (e.target as HTMLElement).closest('.md-math-block') as HTMLElement | null;
+  if (!block) return;
+  const startLine = Number(block.getAttribute('data-source-line') || 0);
+  if (!startLine) return;
+  const found = findMathBlock(props.source || '', startLine);
+  if (!found) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = block.getBoundingClientRect();
+  mathEdit.value = {
+    fromLine: found.from,
+    toLine: found.to,
+    top: rect.bottom + 6,
+    left: rect.left,
+    width: Math.min(Math.max(rect.width, 300), 620),
+  };
+  mathDraft.value = found.latex;
+  nextTick(() => {
+    mathTextarea.value?.focus();
+    mathTextarea.value?.select();
+  });
+}
+
+function saveMathEdit() {
+  if (!mathEdit.value || !props.tabId) return;
+  const lines = (props.source || '').split('\n');
+  const replacement = ('$$\n' + mathDraft.value.trim() + '\n$$').split('\n');
+  lines.splice(mathEdit.value.fromLine, mathEdit.value.toLine - mathEdit.value.fromLine + 1, ...replacement);
+  tabs.setContent(props.tabId, lines.join('\n'));
+  mathEdit.value = null;
+}
+
+function cancelMathEdit() {
+  mathEdit.value = null;
+}
+
+function onMathKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') { e.preventDefault(); cancelMathEdit(); }
+  else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveMathEdit(); }
+}
+
 let mermaidIdSeq = 0;
 
 mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 
 const html = computed(() => {
+  // #141 — establish a reactive dep on the hard-breaks toggle so flipping the
+  // setting re-renders immediately (renderMarkdown reads the md singleton's
+  // option, which isn't reactive by itself).
+  void settings.markdownHardBreaks;
+  // Same reactive-dep trick for the numbered-heading toggle (preprocessMarkdown
+  // reads a module-level flag that isn't reactive on its own).
+  void settings.markdownAutoNumberHeadings;
   const source = props.source || '';
   return rewriteImageUrls(renderMarkdown(source), extractImageRoot(source), props.filePath);
 });
+
+// v4.10 issue #163 — render ```plantuml fences through the configured
+// PlantUML server. Opt-in (`plantumlEnabled`); when off the fence stays a
+// plain code block. Display is an <img> (no fetch → no CORS); onerror keeps
+// the source visible with a hint instead of a broken image.
+function processPlantuml() {
+  if (!host.value) return;
+  if (!settings.plantumlEnabled || !settings.plantumlServer) return;
+  const blocks = host.value.querySelectorAll(
+    'pre > code.language-plantuml, pre > code.language-puml',
+  );
+  for (const block of Array.from(blocks)) {
+    const pre = block.parentElement as HTMLElement | null;
+    if (!pre || pre.dataset.rendered === '1') continue;
+    const code = (block.textContent || '').trim();
+    const wrap = document.createElement('div');
+    wrap.className = 'plantuml-block';
+    const img = document.createElement('img');
+    img.alt = 'PlantUML diagram';
+    img.loading = 'lazy';
+    img.src = plantumlSvgUrl(settings.plantumlServer, code);
+    img.addEventListener('error', () => {
+      const err = document.createElement('pre');
+      err.className = 'plantuml-error';
+      err.textContent = `PlantUML render failed (${settings.plantumlServer})\n\n${code}`;
+      wrap.replaceWith(err);
+    });
+    wrap.appendChild(img);
+    pre.replaceWith(wrap);
+  }
+}
 
 async function processMermaid() {
   if (!host.value) return;
@@ -64,6 +203,77 @@ async function processMermaid() {
   }
 }
 
+// v4.6 F7 — render ```tldraw fences as static board thumbnails in the preview.
+// The fence body is a TLStoreSnapshot; we ask the runtime adapter (dynamic
+// import) to export it to a printable SVG so non-editing surfaces stay light.
+// The board class survives markdown-it as `code.language-tldraw`.
+async function processWhiteboards() {
+  if (!host.value) return;
+  const blocks = host.value.querySelectorAll('pre > code.language-tldraw');
+  if (blocks.length === 0) return;
+  const { boardToSvg } = await import('../lib/tldraw-runtime');
+  // Parse the source fences once so each preview block can recover its stable
+  // boardId/snapshot for the click-to-fullscreen affordance. markdown-it drops
+  // the fence attributes (id/height), so we match preview blocks to source
+  // fences positionally (same document order).
+  const { findTldrawFences } = await import('../lib/tldraw-board');
+  const fences = findTldrawFences(props.source || '');
+  const theme = {
+    colorScheme: (settings.theme === 'dark' ? 'dark' : 'light') as 'dark' | 'light',
+    locale: settings.language || 'en',
+  };
+  const list = Array.from(blocks);
+  for (let idx = 0; idx < list.length; idx++) {
+    const block = list[idx];
+    const pre = block.parentElement as HTMLElement | null;
+    if (!pre || pre.dataset.rendered === '1') continue;
+    pre.dataset.rendered = '1';
+    const snapshot = (block.textContent || '').trim();
+    const fence = fences[idx];
+    const wrap = document.createElement('div');
+    wrap.className = 'whiteboard-block';
+    const makeEditable = (svg: string) => {
+      wrap.innerHTML = svg;
+      // Only the editor preview can write back — read-only skins (slideshow,
+      // export) omit tabId, so the thumbnail stays a static image there.
+      if (fence && props.tabId) {
+        wrap.classList.add('whiteboard-block--clickable');
+        wrap.setAttribute('role', 'button');
+        wrap.setAttribute('tabindex', '0');
+        wrap.title = t('whiteboard.openFull');
+        const openFull = () => {
+          window.dispatchEvent(
+            new CustomEvent('solomd:whiteboard-open', {
+              detail: { boardId: fence.boardId, tabId: props.tabId, snapshot: fence.snapshot },
+            }),
+          );
+        };
+        wrap.addEventListener('click', openFull);
+        wrap.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            openFull();
+          }
+        });
+      }
+    };
+    try {
+      const svg = await boardToSvg(snapshot, theme);
+      if (svg) {
+        makeEditable(svg);
+      } else {
+        wrap.classList.add('whiteboard-block--empty');
+        wrap.textContent = t('whiteboard.empty');
+      }
+      pre.replaceWith(wrap);
+    } catch {
+      wrap.classList.add('whiteboard-block--empty');
+      wrap.textContent = t('whiteboard.loadFailed');
+      pre.replaceWith(wrap);
+    }
+  }
+}
+
 watch(
   () => settings.theme,
   (t) => {
@@ -84,6 +294,8 @@ function overlayStrings(): OverlayStrings {
 
 function attachImageOverlayHandlers() {
   if (!host.value) return;
+
+  installSvgImageFallbacks(host.value);
 
   const images = host.value.querySelectorAll('img');
   for (const img of Array.from(images)) {
@@ -112,16 +324,127 @@ function attachImageOverlayHandlers() {
       openImageOverlay({
         source: svg,
         strings: overlayStrings(),
+        // #162 — Mermaid renders as inline SVG, so the WebView's own
+        // "save image as" only offers HTML; give diagrams real PNG actions.
+        actions: [
+          { label: t('overlay.exportPng'), onClick: () => exportDiagramPng(svg) },
+          { label: t('overlay.copyImage'), onClick: () => copyDiagramPng(svg) },
+        ],
       });
     }) as EventListener);
   }
 }
 
+// #195 — fenced code blocks get a stable, one-click copy affordance. Keep the
+// button outside <pre> so it stays pinned while long code scrolls horizontally,
+// and copy textContent so syntax-highlight spans and optional line numbers are
+// never included in the clipboard payload.
+function attachCodeCopyButtons() {
+  if (!host.value) return;
+  const blocks = host.value.querySelectorAll<HTMLElement>('pre > code');
+  for (const code of Array.from(blocks)) {
+    const pre = code.parentElement as HTMLElement | null;
+    if (!pre || pre.parentElement?.classList.contains('code-block-shell')) continue;
+
+    const shell = document.createElement('div');
+    shell.className = 'code-block-shell';
+    pre.replaceWith(shell);
+    shell.appendChild(pre);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'code-copy-button';
+    button.textContent = t('toolbar.copy');
+    button.title = t('toolbar.copy');
+    button.setAttribute('aria-label', t('toolbar.copy'));
+    button.addEventListener('click', async () => {
+      try {
+        await writeText(code.textContent || '');
+        button.textContent = '✓';
+        window.setTimeout(() => {
+          if (button.isConnected) button.textContent = t('toolbar.copy');
+        }, 1200);
+      } catch (err) {
+        useToastsStore().error(`Copy failed: ${err}`);
+      }
+    });
+    shell.appendChild(button);
+  }
+}
+
+// ── #162: single-diagram PNG export / copy ──────────────────────────
+
+function diagramExportName(): string {
+  const base = props.filePath?.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '');
+  return base ? `${base}-diagram.png` : 'diagram.png';
+}
+
+async function exportDiagramPng(svg: SVGElement) {
+  const toasts = useToastsStore();
+  try {
+    const blob = await svgToPngBlob(svg, { scale: 2, background: diagramBackground() });
+    const path = await saveDialog({
+      defaultPath: diagramExportName(),
+      filters: [{ name: 'PNG Image', extensions: ['png'] }],
+    });
+    if (!path) return;
+    const buffer = new Uint8Array(await blob.arrayBuffer());
+    await invoke('write_binary_file', { path, data: Array.from(buffer) });
+    toasts.success(`Saved ${path.split(/[\\/]/).pop()}`);
+  } catch (err) {
+    toasts.error(`Export failed: ${err}`);
+  }
+}
+
+async function copyDiagramPng(svg: SVGElement) {
+  const toasts = useToastsStore();
+  try {
+    const blob = await svgToPngBlob(svg, { scale: 2, background: diagramBackground() });
+    try {
+      const item = new ClipboardItem({ 'image/png': blob });
+      await navigator.clipboard.write([item]);
+    } catch {
+      // WKWebView denies navigator.clipboard outside a user gesture /
+      // focused document — same fallback as useExport.copyAsImage.
+      const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager');
+      const { Image } = await import('@tauri-apps/api/image');
+      const img = await Image.fromBytes(new Uint8Array(await blob.arrayBuffer()));
+      await writeImage(img);
+    }
+    toasts.success(t('overlay.copyImage') + ' ✓');
+  } catch (err) {
+    toasts.error(`Copy failed: ${err}`);
+  }
+}
+
 watch(html, async () => {
+  // A re-render (incl. our own math write-back) invalidates popup geometry.
+  mathEdit.value = null;
   await nextTick();
+  processPlantuml();
   await processMermaid();
+  await processWhiteboards();
   attachImageOverlayHandlers();
+  attachCodeCopyButtons();
 });
+
+// Toggling PlantUML (or changing the server) must re-render: the markdown
+// HTML string itself is unchanged (PlantUML swaps happen post-render), so
+// v-html would not reset the DOM on its own. Rebuild from html and re-run
+// the processors.
+watch(
+  () => [settings.plantumlEnabled, settings.plantumlServer],
+  async () => {
+    if (!host.value) return;
+    host.value.innerHTML = html.value;
+    await nextTick();
+    processPlantuml();
+    await processMermaid();
+    await processWhiteboards();
+    attachImageOverlayHandlers();
+    attachCodeCopyButtons();
+  },
+);
 
 /**
  * Intercept all link clicks inside the preview pane and open them in the
@@ -154,28 +477,70 @@ function handleLinkClick(e: MouseEvent) {
     });
     return;
   }
-  // Relative path: resolve against current file's directory and open in app
+  // Relative path: resolve against current file's directory. #163-followup —
+  // route through openLinkedFile so a link to a PDF / Office / etc. opens with
+  // the OS default app (when openLinkedFilesExternally is on) instead of being
+  // converted to Markdown; md / text / images still open in-app.
   if (props.filePath) {
-    const sep = props.filePath.lastIndexOf('/');
-    const dir = sep >= 0 ? props.filePath.substring(0, sep + 1) : '';
-    // Normalise: strip leading ./
-    const cleaned = href.replace(/^\.\//, '');
-    const resolved = dir + cleaned;
-    files.openPath(resolved, { bypassNewWindow: true }).catch((err) => {
-      console.warn('[Preview] openPath failed:', resolved, err);
+    const resolved = resolveRelativePath(props.filePath, href);
+    files.openLinkedFile(resolved, { bypassNewWindow: true }).catch((err) => {
+      console.warn('[Preview] openLinkedFile failed:', resolved, err);
     });
   }
 }
 
+/**
+ * #116 — resolve a relative markdown link against the current file's path.
+ * Robust to (a) Windows back-slash separators, (b) percent-encoded hrefs
+ * (CJK filenames / spaces are URL-encoded by the renderer), and (c) `../` /
+ * `./` traversal. The result is emitted in the base path's separator style so
+ * the Rust side opens it on every platform.
+ */
+function resolveRelativePath(basePath: string, href: string): string {
+  // Strip any #fragment / ?query the anchor may carry, then decode.
+  let rel = href.replace(/[#?].*$/, '');
+  try {
+    rel = decodeURIComponent(rel);
+  } catch {
+    /* malformed encoding — fall back to the raw href */
+  }
+  const winStyle = basePath.includes('\\') && !basePath.includes('/');
+  const sepCh = winStyle ? '\\' : '/';
+  // #138 — a UNC path (`\\server\share\…`, or WSL's `\\wsl$\Ubuntu\…` /
+  // `\\wsl.localhost\…`) starts with a DOUBLE separator. Splitting on
+  // `[\\/]+` collapses that pair into one match, so a naive join emits a
+  // single leading `\` — an invalid path that Rust's `fs::read` rejects with
+  // os error 3. Detect it and restore the second leading separator.
+  const isUnc = /^[\\/]{2}/.test(basePath);
+  // Directory segments of the current file (drop the file name itself).
+  const segs = basePath.split(/[\\/]+/);
+  segs.pop();
+  for (const part of rel.split(/[\\/]+/)) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (segs.length > 1) segs.pop();
+      continue;
+    }
+    segs.push(part);
+  }
+  const joined = segs.join(sepCh);
+  return isUnc ? sepCh + joined : joined;
+}
+
 onMounted(async () => {
   await nextTick();
+  processPlantuml();
   await processMermaid();
+  await processWhiteboards();
   attachImageOverlayHandlers();
+  attachCodeCopyButtons();
   host.value?.addEventListener('click', handleLinkClick);
+  host.value?.addEventListener('dblclick', onPreviewDblClick);
 });
 
 onBeforeUnmount(() => {
   host.value?.removeEventListener('click', handleLinkClick);
+  host.value?.removeEventListener('dblclick', onPreviewDblClick);
 });
 
 function openSearch() {
@@ -219,11 +584,44 @@ function scrollToLine(line: number) {
   container.scrollTo({ top: offset, behavior: 'smooth' });
 }
 
+// #189 — copying rendered content into mail clients / rich editors dropped
+// the table borders: the copied HTML referenced our stylesheet classes,
+// which don't travel with the clipboard. When the selection contains a
+// table, rewrite the text/html clipboard flavor with the essential styles
+// inlined (neutral light palette — the paste target is typically a white
+// document regardless of the app theme).
+function onPreviewCopy(e: ClipboardEvent) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !e.clipboardData) return;
+  const range = sel.getRangeAt(0);
+  const frag = range.cloneContents();
+  if (!frag.querySelector('table')) return;
+  const wrap = document.createElement('div');
+  wrap.appendChild(frag);
+  for (const table of Array.from(wrap.querySelectorAll('table'))) {
+    table.setAttribute(
+      'style',
+      'border-collapse:collapse;border-spacing:0;' + (table.getAttribute('style') || ''),
+    );
+    for (const cell of Array.from(table.querySelectorAll('th,td'))) {
+      const isHeader = cell.tagName === 'TH';
+      cell.setAttribute(
+        'style',
+        `border:1px solid #c9c9c9;padding:6px 12px;${isHeader ? 'background:#f2f2f2;font-weight:600;' : ''}` +
+          (cell.getAttribute('style') || ''),
+      );
+    }
+  }
+  e.clipboardData.setData('text/html', wrap.innerHTML);
+  e.clipboardData.setData('text/plain', sel.toString());
+  e.preventDefault();
+}
+
 defineExpose({ scrollToLine, openSearch });
 </script>
 
 <template>
-  <div class="preview-host" :class="{ 'preview-host--reading': skin === 'reading' }">
+  <div class="preview-host" :class="{ 'preview-host--reading': skin === 'reading' }" @copy="onPreviewCopy">
     <PreviewSearch
       v-if="searchOpen && host"
       ref="searchRef"
@@ -234,11 +632,39 @@ defineExpose({ scrollToLine, openSearch });
       ref="host"
       class="preview-content"
       :class="{
-        'preview-content--fit': settings.previewFitWidth && skin !== 'reading',
+        'preview-content--fit': settings.previewFitWidth,
         'preview-content--reading': skin === 'reading',
+        'cb-numbered-on': settings.codeBlockLineNumbers,
+        'cb-wrap-on': settings.codeBlockWrap,
       }"
+      :style="{ '--preview-max-width': `${settings.previewMaxWidth || 760}px` }"
       v-html="html"
     ></article>
+
+    <!-- v4.6 — editable display math: inline LaTeX editor opened by
+         double-clicking a rendered $$…$$ formula. -->
+    <template v-if="mathEdit">
+      <div class="math-edit-backdrop" @mousedown="cancelMathEdit"></div>
+      <div
+        class="math-edit-popover"
+        :style="{ top: `${mathEdit.top}px`, left: `${mathEdit.left}px`, width: `${mathEdit.width}px` }"
+        @mousedown.stop
+      >
+        <div class="math-edit-head"><span>LaTeX</span></div>
+        <textarea
+          ref="mathTextarea"
+          v-model="mathDraft"
+          class="math-edit-area"
+          spellcheck="false"
+          rows="3"
+          @keydown="onMathKeydown"
+        ></textarea>
+        <div class="math-edit-actions">
+          <button class="math-edit-btn" @mousedown.prevent="cancelMathEdit">{{ t('unsaved.cancel') }}</button>
+          <button class="math-edit-btn math-edit-btn--primary" @mousedown.prevent="saveMathEdit">{{ t('unsaved.save') }} <span class="math-edit-kbd">⌘↵</span></button>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -258,12 +684,19 @@ defineExpose({ scrollToLine, openSearch });
   border-left: 1px solid var(--border);
 }
 :where(.preview-content) {
-  max-width: 760px;
+  /* v4.10 #165 — column width is user-tunable (previewMaxWidth setting sets
+     the var on the article); 760px was the old hardcoded value. */
+  max-width: var(--preview-max-width, 760px);
   margin: 0 auto;
   padding: 28px 36px 64px;
   color: var(--text);
-  font-family: var(--font-ui);
-  font-size: 15px;
+  /* #133 — honor the editor `fontFamily` setting (set as `--content-font-family`
+     in App.vue) so the rendered pane matches the editor in split view. Falls
+     back to the UI font when unset. */
+  font-family: var(--content-font-family, var(--font-ui));
+  /* v4.3.0 PR #74 — preview-only font size; driven by settings.previewFontSize
+     via the `--content-font-size` CSS custom property set in App.vue. */
+  font-size: var(--content-font-size, 15px);
   line-height: 1.7;
 }
 .preview-content--fit {
@@ -309,10 +742,88 @@ defineExpose({ scrollToLine, openSearch });
   border-radius: 6px;
   overflow-x: auto;
 }
+.code-block-shell {
+  position: relative;
+  margin: 1em 0;
+}
+.code-block-shell > pre {
+  margin: 0;
+  padding-right: 80px;
+}
+.code-copy-button {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
+  min-width: 48px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--text-muted);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0.78;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.code-copy-button:hover,
+.code-copy-button:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
 :where(.preview-content) pre code {
   font-family: var(--font-mono);
   background: transparent;
   padding: 0;
+}
+/* #178: opt-in soft wrap for long code lines (no horizontal scrollbar).
+ * break-word keeps normal tokens intact and only splits ones wider than
+ * the block (long URLs, hashes). */
+.preview-content.cb-wrap-on pre {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-x: visible;
+}
+/* v4.3.0 issue #65: optional line numbers for fenced code blocks. The
+ * `.cb-line` wrappers are always emitted by markdown.ts; numbering is
+ * activated only when `.preview-content` has `cb-numbered-on`, set by the
+ * `codeBlockLineNumbers` setting. Counter increments per line; the gutter
+ * uses ::before so it doesn't pollute copy/paste of the code itself. */
+.preview-content.cb-numbered-on pre.cb-numbered {
+  counter-reset: cb-line;
+  padding-left: 0;
+}
+.preview-content.cb-numbered-on pre.cb-numbered code {
+  display: block;
+  /* #164 — the markup keeps a literal '\n' between the block-level .cb-line
+   * spans (needed for the inline, non-numbered flow). Under `pre` whitespace
+   * each of those newlines renders an EMPTY line box, doubling the apparent
+   * line spacing. Collapse them here; each .cb-line restores `pre` for its
+   * own content so indentation survives. */
+  white-space: normal;
+}
+.preview-content.cb-numbered-on pre.cb-numbered code .cb-line {
+  counter-increment: cb-line;
+  display: block;
+  padding-left: 3.4em;
+  position: relative;
+  white-space: pre;
+}
+.preview-content.cb-numbered-on pre.cb-numbered code .cb-line::before {
+  content: counter(cb-line);
+  position: absolute;
+  left: 0;
+  width: 2.6em;
+  padding-right: 0.6em;
+  text-align: right;
+  color: var(--text-faint);
+  border-right: 1px solid var(--border);
+  user-select: none;
+  -webkit-user-select: none;
 }
 :where(.preview-content) blockquote {
   border-left: 3px solid var(--accent);
@@ -357,6 +868,21 @@ defineExpose({ scrollToLine, openSearch });
   cursor: zoom-in;
   transition: opacity 0.15s;
 }
+/* v4.10 #163 — PlantUML server-rendered diagrams. */
+:where(.preview-content) .plantuml-block {
+  display: flex;
+  justify-content: center;
+  margin: 1.5em 0;
+}
+:where(.preview-content) .plantuml-block img {
+  max-width: 100%;
+  height: auto;
+}
+:where(.preview-content) .plantuml-error {
+  color: var(--text-muted);
+  border-left: 3px solid var(--accent);
+  white-space: pre-wrap;
+}
 :where(.preview-content) .mermaid-block:hover {
   opacity: 0.85;
 }
@@ -368,6 +894,36 @@ defineExpose({ scrollToLine, openSearch });
   color: var(--danger);
   background: rgba(214, 69, 69, 0.08);
   border-left: 3px solid var(--danger);
+}
+/* F7 — static whiteboard thumbnail in preview/reading/export. */
+:where(.preview-content) .whiteboard-block {
+  display: flex;
+  justify-content: center;
+  margin: 1.5em 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+:where(.preview-content) .whiteboard-block svg {
+  max-width: 100%;
+  height: auto;
+}
+:where(.preview-content) .whiteboard-block--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+:where(.preview-content) .whiteboard-block--clickable:hover {
+  border-color: var(--accent, #ff9f40);
+  box-shadow: 0 0 0 1px var(--accent, #ff9f40);
+}
+:where(.preview-content) .whiteboard-block--clickable:focus-visible {
+  outline: 2px solid var(--accent, #ff9f40);
+  outline-offset: 2px;
+}
+:where(.preview-content) .whiteboard-block--empty {
+  color: var(--text-faint);
+  font-style: italic;
 }
 :where(.preview-content) .katex-display {
   overflow-x: auto;
@@ -436,13 +992,24 @@ defineExpose({ scrollToLine, openSearch });
     "Noto Serif",
     Georgia,
     serif;
-  max-width: 720px;
+  /* v4.10 #165 — reading column follows the same width setting as the
+     preview pane (720px was the old hardcoded serif column). */
+  max-width: var(--preview-max-width, 720px);
   margin: 0 auto;
   padding: 64px 32px 96px;
   font-family: var(--font-reading);
-  font-size: 18px;
+  /* #143 — scale with the user's preview font size instead of a fixed 18px
+     (the setting looked dead in reading mode). 1.2× keeps reading mode's
+     slightly-larger-than-preview feel at the 15px default (= the old 18px). */
+  font-size: calc(var(--content-font-size, 15px) * 1.2);
   line-height: 1.8;
   color: var(--text);
+}
+/* #117 — let the Fit-Width toggle widen reading mode too (full-bleed reading
+   column instead of the fixed 720px). Needs higher specificity than the plain
+   `.preview-content--reading` rule above, which appears later in source. */
+.preview-content--reading.preview-content--fit {
+  max-width: none;
 }
 :where(.preview-content--reading) h1,
 :where(.preview-content--reading) h2,
@@ -477,5 +1044,91 @@ defineExpose({ scrollToLine, openSearch });
     padding: 32px 18px 64px;
     font-size: 17px;
   }
+}
+
+/* ── Editable display math (v4.6) ───────────────────────────────────── */
+/* The formula container lives inside v-html, so scope it to .preview-content. */
+:where(.preview-content) .md-math-block {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+}
+:where(.preview-content) .md-math-block:hover {
+  background: color-mix(in srgb, var(--accent, #ff9f40) 12%, transparent);
+}
+/* Popover + backdrop are Preview's own nodes (not v-html). */
+.math-edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.math-edit-popover {
+  position: fixed;
+  z-index: 41;
+  max-width: 90vw;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.math-edit-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #888);
+  padding: 0 2px;
+}
+.math-edit-area {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #222);
+  background: var(--bg-elevated, var(--bg, #fff));
+  border: 1px solid var(--border, #ddd);
+  border-radius: 6px;
+  padding: 8px;
+  outline: none;
+}
+.math-edit-area:focus {
+  border-color: var(--accent, #ff9f40);
+}
+.math-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.math-edit-btn {
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #ddd);
+  background: transparent;
+  color: var(--text, #222);
+  cursor: pointer;
+}
+.math-edit-btn:hover {
+  background: color-mix(in srgb, var(--text, #000) 6%, transparent);
+}
+.math-edit-btn--primary {
+  background: var(--accent, #ff9f40);
+  border-color: var(--accent, #ff9f40);
+  color: #000;
+}
+.math-edit-btn--primary:hover {
+  filter: brightness(0.96);
+}
+.math-edit-kbd {
+  opacity: 0.6;
+  font-size: 11px;
+  margin-left: 2px;
 }
 </style>

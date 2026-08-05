@@ -32,6 +32,7 @@ export type ProviderId =
   | 'kimi'
   | 'volcengine'
   | 'siliconflow'
+  | 'minimax'
   // Aggregator
   | 'openrouter'
   // Local
@@ -80,9 +81,9 @@ export const PROVIDERS: ProviderConfig[] = [
     id: 'openai',
     label: 'OpenAI',
     apiFormat: 'openai',
-    defaultModel: 'gpt-5.5',
+    defaultModel: 'gpt-5.6',
     defaultBaseUrl: 'https://api.openai.com/v1',
-    modelHint: 'gpt-5.5 · gpt-5.5-pro · gpt-5.4 · gpt-5.4-mini · gpt-5.4-nano',
+    modelHint: 'gpt-5.6 · gpt-5.6-sol · gpt-5.6-terra · gpt-5.6-luna · gpt-5.4-mini',
     signupUrl: 'https://platform.openai.com/api-keys',
   },
   {
@@ -91,7 +92,7 @@ export const PROVIDERS: ProviderConfig[] = [
     apiFormat: 'anthropic',
     defaultModel: 'claude-sonnet-4-6',
     defaultBaseUrl: 'https://api.anthropic.com',
-    modelHint: 'claude-opus-4-7 · claude-sonnet-4-6 · claude-haiku-4-5',
+    modelHint: 'claude-fable-5 · claude-opus-4-8 · claude-sonnet-4-6 · claude-haiku-4-5',
     signupUrl: 'https://console.anthropic.com/settings/keys',
   },
   {
@@ -101,17 +102,17 @@ export const PROVIDERS: ProviderConfig[] = [
     defaultModel: 'gemini-3.1-pro-preview',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     modelHint:
-      'gemini-3.1-pro-preview · gemini-3-flash-preview · gemini-2.5-flash · gemini-3.1-flash-lite-preview · gemini-2.0-flash',
+      'gemini-3.1-pro-preview · gemini-3.6-flash · gemini-3.5-flash · gemini-3.5-flash-lite',
     signupUrl: 'https://aistudio.google.com/apikey',
   },
   {
     id: 'xai',
     label: 'xAI Grok',
     apiFormat: 'openai',
-    defaultModel: 'grok-4.20',
+    defaultModel: 'grok-4.5',
     defaultBaseUrl: 'https://api.x.ai/v1',
     modelHint:
-      'grok-4.20 · grok-4-fast-reasoning · grok-4-1-fast-reasoning · grok-4-1-fast-non-reasoning · grok-code-fast-1',
+      'grok-4.5 · grok-4.3 · grok-build-0.1 · grok-4.20-0309-reasoning · grok-4.20-0309-non-reasoning',
     signupUrl: 'https://console.x.ai',
   },
   {
@@ -141,8 +142,8 @@ export const PROVIDERS: ProviderConfig[] = [
     apiFormat: 'openai',
     defaultModel: 'deepseek-v4-flash',
     defaultBaseUrl: 'https://api.deepseek.com/v1',
-    modelHint:
-      'deepseek-v4-pro · deepseek-v4-flash · deepseek-chat (legacy) · deepseek-reasoner (legacy)',
+    // deepseek-chat / deepseek-reasoner were retired 2026-07-24 — V4 ids only.
+    modelHint: 'deepseek-v4-pro · deepseek-v4-flash',
     signupUrl: 'https://platform.deepseek.com/api_keys',
   },
   {
@@ -159,30 +160,30 @@ export const PROVIDERS: ProviderConfig[] = [
     id: 'glm',
     label: '智谱 GLM',
     apiFormat: 'openai',
-    defaultModel: 'glm-4.6',
+    defaultModel: 'glm-5.2',
     defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     modelHint:
-      'glm-5.1 · glm-5 · glm-5-turbo · glm-4.7 · glm-4.6 · glm-4.7-flashx · glm-4.5-air · glm-5v-turbo · codegeex-4',
+      'glm-5.2 · glm-5.1 · glm-5 · glm-5-turbo · glm-4.7 · glm-4.7-flashx · glm-4.5-air · glm-5v-turbo',
     signupUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
   },
   {
     id: 'kimi',
     label: 'Moonshot Kimi',
     apiFormat: 'openai',
-    defaultModel: 'kimi-k2-0905-preview',
+    defaultModel: 'kimi-k3',
     defaultBaseUrl: 'https://api.moonshot.cn/v1',
     modelHint:
-      'kimi-k2-0905-preview · kimi-k2-turbo-preview · kimi-k2-thinking · kimi-latest · moonshot-v1-128k',
+      'kimi-k3 · kimi-k2-thinking · kimi-k2-turbo-preview · kimi-latest',
     signupUrl: 'https://platform.moonshot.cn/console/api-keys',
   },
   {
     id: 'volcengine',
     label: '火山方舟 / 豆包 (Volcengine ARK)',
     apiFormat: 'openai',
-    defaultModel: 'doubao-seed-1.6',
+    defaultModel: 'doubao-seed-2.1-pro',
     defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     modelHint:
-      'doubao-seed-1.6 · doubao-seed-1.6-lite · doubao-seed-1.6-flash · doubao-seed-1.6-thinking · doubao-seed-1.6-vision · doubao-1-5-pro-32k',
+      'doubao-seed-2.1-pro · doubao-seed-2.1-turbo · doubao-seed-2.0-lite · doubao-seed-2.0-mini · doubao-seed-1.6',
     signupUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
   },
   {
@@ -194,6 +195,18 @@ export const PROVIDERS: ProviderConfig[] = [
     modelHint:
       'deepseek-ai/DeepSeek-V3 · Qwen/Qwen2.5-Coder-32B-Instruct · moonshotai/Kimi-K2-Instruct · meta-llama/Meta-Llama-3.1-70B-Instruct',
     signupUrl: 'https://cloud.siliconflow.cn/account/ak',
+  },
+  {
+    id: 'minimax',
+    label: 'MiniMax',
+    apiFormat: 'openai',
+    defaultModel: 'MiniMax-M3',
+    // Global OpenAI-compatible endpoint. The CN region
+    // (https://api.minimaxi.com/v1) is reachable by overriding the base URL
+    // in AI Settings — the proxy honors the per-provider base_url override.
+    defaultBaseUrl: 'https://api.minimax.io/v1',
+    modelHint: 'MiniMax-M3 · MiniMax-M2.7',
+    signupUrl: 'https://platform.minimax.io/',
   },
   // ---- Aggregator (one key, hundreds of models) ---------------------
   {

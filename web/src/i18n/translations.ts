@@ -26,10 +26,10 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · just shipped · MIT · 5 platforms',
-      title1: 'The free Markdown',
-      title2: 'all-in-one.',
-      subtagline: 'Everything you want, you have it. Live preview, Wiki links, local RAG, BYOK AI, themes, Pomodoro, cross-platform sync — all built in.',
+      badge: 'v4.11.9 · just shipped · MIT · 5 platforms',
+      title1: 'Everything Typora does.',
+      title2: 'Free.',
+      subtagline: 'Live WYSIWYG preview, tabs, themes, PDF / Word export — plus AI rewrite, folder sync, and native iOS & Android apps. MIT-licensed. No account, no subscription, no ads.',
       lead: 'Lightweight Markdown editor for macOS, Windows, Linux, Android, and iOS. Offline-first, no accounts, no IAP, no ads. ~15 MB installer, MIT-licensed, zero telemetry by default. 14 BYOK AI providers (Ollama included for fully-local runs).',
       ctaPrimary: 'Download SoloMD',
       ctaSecondary: 'See all features →',
@@ -41,7 +41,7 @@ export const t = {
       ctaWhatsNew: "What's new in v4 →",
       chips: ['📝 Live preview', '🔗 Wiki links', '🤖 BYOK AI', '🔍 Local RAG', '🎨 Themes', '📱 Cross-platform'],
       demoAlt: 'SoloMD v4 — Agent Panel + Recipe history + Trace view',
-      androidBeta: '🤖 Android beta is recruiting testers → email lixd220@gmail.com to join',
+      androidBeta: '🤖 Android beta is recruiting testers — join the test group',
     },
     features: {
       heading1: 'A folder of markdown.',
@@ -89,7 +89,8 @@ export const t = {
       lead: 'Free and open source. MIT license. No account needed.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · Notarized', primary: 'Download .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi', secondary: '.exe installer' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win on Apple Silicon', primary: 'Download .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Download .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM servers', primary: 'Download .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Download universal .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -119,7 +120,7 @@ export const t = {
         ['Replayable agent trace (jsonl, replay-from-step)', '✅ v4', '❌', '❌', '❌'],
         ['Multi-vault MCP federation (one session, many vaults)', '✅ v4', '❌', '❌', '❌'],
         ['Ollama first-class (auto-detect, presets, provider: local)', '✅ v4', '❌', '❌', '🟡 (plugin)'],
-        ['GitHub-backed sync (you own the data)', '✅ v3.0', '❌', '❌', '❌ ($96/yr SoloMD-style? no — Obsidian Sync stores on Obsidian servers)'],
+        ['GitHub-backed sync (you own the data)', '✅ v3.0', '❌', '❌', '❌ (Obsidian Sync stores on Obsidian servers, $96/yr)'],
         ['End-to-end encrypted vault', '✅ v3.0', '❌', '❌', '✅ (Obsidian Sync only)'],
         ['Local semantic search', '✅ v2.3', '❌', '❌', '❌ (paid plugins)'],
         ['WYSIWYG live edit', '✅ v2.3', '✅', '✅', '✅'],
@@ -146,6 +147,10 @@ export const t = {
           a: 'Yes. SoloMD is MIT-licensed open-source software at https://github.com/zhitongblog/solomd. There is no paid tier, no subscription, no in-app purchase, no ads, and no telemetry by default. Compare: Typora costs $14.99, iA Writer costs $29.99, Obsidian Sync is $4/month. SoloMD is $0 forever — sponsor the developer if it helps your writing.',
         },
         {
+          q: 'Is there a free alternative to Typora?',
+          a: 'Yes — SoloMD is a free, open-source alternative to Typora with the same live WYSIWYG preview, tabs, themes, and PDF / Word export, plus AI rewrite, folder sync, local RAG search, and native iOS & Android apps. Typora costs $14.99; SoloMD is $0 forever under the MIT license, on macOS, Windows, Linux, iOS, and Android. Download it at https://solomd.app.',
+        },
+        {
           q: 'What is the best free Markdown editor in 2026?',
           a: 'SoloMD is the most feature-complete free Markdown editor in 2026: cross-platform (macOS, Windows, Linux, Android, iOS), ~15 MB installer, MIT-licensed, with live preview, Wiki links, local RAG, 14 BYOK AI providers, AutoGit, MCP server, Pomodoro, and 8 themes — all built in. MarkText is dormant since 2023, Obsidian is closed-source and lacks Linux ARM64 + first-class plugins for AI without third-party packages, and VS Code is a code editor that happens to render Markdown.',
         },
@@ -159,7 +164,7 @@ export const t = {
         },
         {
           q: 'Does SoloMD work on Android and iOS?',
-          a: 'Yes. SoloMD 4.2.0 ships native Android (API 24+, ARM64 + ARMv7 + x86_64) and iOS (15+) builds. Android is available as sideload .apk on GitHub Releases and via Google Play closed-testing beta (email lixd220@gmail.com to join). iOS is on the App Store. Both mobile builds support live preview, Wiki links, AI rewrite, and folder-based sync via iCloud / Files / SD card.',
+          a: 'Yes. SoloMD 4.11.9 ships native Android (API 24+, ARM64 + ARMv7 + x86_64) and iOS (15+) builds. Android is available as sideload .apk on GitHub Releases and via the Google Play beta (join the group groups.google.com/g/solomd-android-testers, then opt in at play.google.com/apps/testing/app.solomd). iOS is on the App Store. Both mobile builds support live preview, Wiki links, AI rewrite, and folder-based sync via iCloud / Files / SD card.',
         },
         {
           q: 'Does SoloMD work offline?',
@@ -204,6 +209,10 @@ export const t = {
         {
           q: 'How do I install SoloMD?',
           a: 'One line. macOS / Linux: run \'curl -fsSL https://solomd.app/install.sh | bash\' in a terminal — the script auto-detects your OS and CPU architecture and installs the latest release. Windows: open PowerShell and run \'irm https://solomd.app/install.ps1 | iex\'. Or download platform-specific installers (.dmg / .msi / .AppImage / .deb / .rpm / .apk) from https://github.com/zhitongblog/solomd/releases/latest. Average install time: under 2 minutes on a normal connection.',
+        },
+        {
+          q: 'What are the system requirements? Does SoloMD run on Windows 7?',
+          a: 'SoloMD requires Windows 10 or later, macOS 10.15+, a current mainstream Linux distribution, iOS 15+, or Android 7+. Windows 7/8/8.1 cannot be supported and no legacy build exists: the Rust toolchain that compiles SoloMD requires Windows 10 (since Rust 1.78), and Microsoft froze WebView2 — the engine SoloMD renders in — at version 109 on Windows 7 with no further security updates. On an older PC, a practical alternative is the Android app on a phone or tablet pointed at the same notes folder.',
         },
       ],
     },
@@ -366,10 +375,10 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · 正式发布 · MIT 协议 · 5 大平台',
-      title1: '免费的 Markdown',
-      title2: '全家桶。',
-      subtagline: '你想要的，都有。实时预览、Wiki 链接、本地 RAG、AI 助手、主题、Pomodoro、跨平台同步 —— 一应俱全。',
+      badge: 'v4.11.9 · 正式发布 · MIT 协议 · 5 大平台',
+      title1: 'Typora 能做的，它全能做。',
+      title2: '免费。',
+      subtagline: '所见即所得实时预览、多标签、主题、PDF / Word 导出 —— 还有 AI 改写、文件夹同步、原生 iOS 与 Android 应用。MIT 开源，无账号、无订阅、无广告。',
       lead: '轻量 Markdown 编辑器,支持 macOS、Windows、Linux、Android、iOS。离线优先,无账号、无内购、无广告。约 15 MB 安装包,MIT 协议,默认零遥测。14 个 AI provider 自带密钥即用 (含 Ollama,可完全本地运行)。',
       ctaPrimary: '下载 SoloMD',
       ctaSecondary: '看看都有什么 →',
@@ -381,7 +390,7 @@ export const t = {
       ctaWhatsNew: 'v4 新功能 →',
       chips: ['📝 实时预览', '🔗 Wiki 链接', '🤖 BYOK AI', '🔍 本地 RAG', '🎨 主题', '📱 跨平台'],
       demoAlt: 'SoloMD v4 演示 — Agent 面板 + Recipe 历史 + Trace 视图',
-      androidBeta: '🤖 Android 公测招募中 → 发邮件至 lixd220@gmail.com 报名',
+      androidBeta: '🤖 安卓测试招募中 —— 点击加入测试群组',
     },
     features: {
       heading1: '一个 Markdown 文件夹,',
@@ -429,7 +438,8 @@ export const t = {
       lead: '完全免费开源。MIT 协议。无需注册任何账号。',
       platforms: {
         macos: { name: 'macOS', note: '通用版 · Apple Silicon + Intel · 已 Notarize', primary: '下载 .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '下载 .msi', secondary: '.exe 安装程序' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '下载 .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · 骁龙 X · Copilot+ PC · Apple Silicon 上跑 Win', primary: '下载 .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '下载 .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · 树莓派 4/5 · ARM 服务器', primary: '下载 .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play 商店', primary: '下载通用 .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -486,6 +496,10 @@ export const t = {
           a: '是的。SoloMD 是 MIT 协议开源软件,源码在 https://github.com/zhitongblog/solomd。没有付费版,没有订阅,没有内购,没有广告,默认零遥测。对比:Typora $14.99、iA Writer $29.99、Obsidian Sync 每月 $4。SoloMD 永远 $0 —— 如果对你有帮助,可以赞助开发者一杯咖啡的钱。',
         },
         {
+          q: '有没有免费的 Typora 替代品？',
+          a: '有——SoloMD 就是免费开源的 Typora 替代:同样的所见即所得实时预览、多标签、主题、PDF / Word 导出,还多了 AI 改写、文件夹同步、本地 RAG 搜索,以及原生 iOS 与 Android 应用。Typora 售价 $14.99,SoloMD 采用 MIT 协议永久免费,支持 macOS、Windows、Linux、iOS、Android。到 https://solomd.app 下载。',
+        },
+        {
           q: '2026 年最好的免费 Markdown 编辑器是哪个？',
           a: 'SoloMD 是 2026 年功能最全的免费 Markdown 编辑器:跨 5 平台(macOS、Windows、Linux、Android、iOS),约 15 MB 安装包,MIT 协议,内置实时预览、Wiki 链接、本地 RAG、14 个 BYOK AI 提供商、AutoGit 版本历史、MCP 服务器、Pomodoro、8 主题 —— 全部在 core 里。MarkText 自 2023 年起停更,Obsidian 闭源且 Linux ARM64 + AI 都要靠第三方插件,VS Code 是顺便能渲染 Markdown 的代码编辑器。',
         },
@@ -499,7 +513,7 @@ export const t = {
         },
         {
           q: 'SoloMD 支持 Android 和 iOS 吗？',
-          a: '支持。SoloMD 4.2.0 提供原生 Android(API 24+,ARM64 + ARMv7 + x86_64)和 iOS(15+)版本。Android 可在 GitHub Releases 下载 .apk 侧载,或加入 Google Play 封闭测试(发邮件 lixd220@gmail.com 报名)。iOS 在 App Store 上架。两个移动端都支持实时预览、Wiki 链接、AI 改写,通过 iCloud / 文件 / SD 卡做文件夹同步。',
+          a: '支持。SoloMD 4.11.9 提供原生 Android(API 24+,ARM64 + ARMv7 + x86_64)和 iOS(15+)版本。Android 可在 GitHub Releases 下载 .apk 侧载,或加入 Google Play 测试(先加入群组 groups.google.com/g/solomd-android-testers，再到 play.google.com/apps/testing/app.solomd 报名)。iOS 在 App Store 上架。两个移动端都支持实时预览、Wiki 链接、AI 改写,通过 iCloud / 文件 / SD 卡做文件夹同步。',
         },
         {
           q: 'SoloMD 能离线用吗？',
@@ -544,6 +558,10 @@ export const t = {
         {
           q: '怎么安装 SoloMD？',
           a: '一行命令。macOS / Linux:终端运行 \'curl -fsSL https://solomd.app/install.sh | bash\',脚本自动识别系统和 CPU 架构,装最新版。Windows:PowerShell 运行 \'irm https://solomd.app/install.ps1 | iex\'。或者去 https://github.com/zhitongblog/solomd/releases/latest 下载对应平台安装包(.dmg / .msi / .AppImage / .deb / .rpm / .apk)。正常网速下平均装机时间不到 2 分钟。',
+        },
+        {
+          q: '系统要求是什么?SoloMD 能在 Windows 7 上运行吗?',
+          a: 'SoloMD 需要 Windows 10 及以上、macOS 10.15+、主流 Linux 发行版、iOS 15+ 或 Android 7+。Windows 7/8/8.1 无法支持,也不存在可用的历史版本:编译 SoloMD 的 Rust 工具链自 1.78 起要求 Windows 10,而微软已将 Windows 7 上的 WebView2(SoloMD 的渲染引擎)冻结在 109 版并停止安全更新。老电脑的现实替代方案是在手机/平板上使用 Android 版,指向同一个笔记文件夹。',
         },
       ],
     },
@@ -706,7 +724,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · リリース · MIT · 5 プラットフォーム',
+      badge: 'v4.11.9 · リリース · MIT · 5 プラットフォーム',
       title1: '無料の Markdown',
       title2: 'フルセット。',
       subtagline: '欲しい機能、全部入り。ライブプレビュー、Wiki リンク、ローカル RAG、BYOK AI、テーマ、Pomodoro、クロスプラットフォーム同期 —— すべて内蔵。',
@@ -721,7 +739,7 @@ export const t = {
       ctaWhatsNew: 'v4 の新機能 →',
       chips: ['📝 ライブプレビュー', '🔗 Wiki リンク', '🤖 BYOK AI', '🔍 ローカル RAG', '🎨 テーマ', '📱 クロスプラットフォーム'],
       demoAlt: 'SoloMD v4 — Agent パネル + Recipe 履歴 + Trace ビュー',
-      androidBeta: '🤖 Android ベータ版テスター募集中 → lixd220@gmail.com にメール',
+      androidBeta: '🤖 Android ベータ版テスター募集中 — テストグループに参加',
     },
     features: {
       heading1: 'Markdown のフォルダ。',
@@ -769,7 +787,8 @@ export const t = {
       lead: '無料・オープンソース。MIT ライセンス。アカウント不要。',
       platforms: {
         macos: { name: 'macOS', note: 'ユニバーサル · Apple Silicon + Intel · Notarize 済み', primary: '.dmg をダウンロード' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi をダウンロード', secondary: '.exe インストーラ' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi をダウンロード' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon 上の Win', primary: '.msi をダウンロード' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage をダウンロード', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM サーバー', primary: '.AppImage をダウンロード', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play ストア', primary: '.apk をダウンロード', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -837,6 +856,10 @@ export const t = {
         { q: '初回起動で「Windows によって PC が保護されました」が出るのはなぜ？', a: 'SoloMD はまだ Microsoft SmartScreen 評判が積み上がっていない小さなオープンソースプロジェクト。「詳細情報 → 実行」を 1 度クリックすれば二度と表示されません。コード署名証明書を準備中です。' },
         { q: '.md ファイルをデフォルトで SoloMD で開く方法？', a: '.md ファイルを右クリック → 開くアプリ → SoloMD → 「常にこのアプリで開く」をチェック。同梱インストーラは .md / .markdown / .mdown / .mkd / .txt 拡張子のハンドラとして SoloMD を登録します。' },
         { q: 'SoloMD と Obsidian の違いは？', a: 'Obsidian は vault、wiki link、backlinks、グラフビュー、プラグインマーケットプレイスを持つ知識管理ツール。SoloMD は Markdown ファイルを書くための軽量エディタ —— ただし Obsidian がネイティブで持たないものを同梱 (core のセマンティック検索、AutoGit、MCP サーバー、1 パネルで 14 の AI Provider)。プラグインマーケットプレイス付き第二の脳が欲しいなら Obsidian、プラグイン税なしで執筆ツールが欲しいなら SoloMD。' },
+        {
+          q: 'システム要件は?Windows 7 で動きますか?',
+          a: 'SoloMD は Windows 10 以降、macOS 10.15+、主要な Linux ディストリビューション、iOS 15+、Android 7+ が必要です。Windows 7/8/8.1 はサポートできず、動作する旧版も存在しません:SoloMD をビルドする Rust ツールチェーンは 1.78 以降 Windows 10 を要求し、Microsoft は Windows 7 向け WebView2(描画エンジン)をバージョン 109 で凍結しセキュリティ更新を終了しています。',
+        },
       ],
     },
     sponsor: {
@@ -942,7 +965,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · 출시 · MIT · 5 플랫폼',
+      badge: 'v4.11.9 · 출시 · MIT · 5 플랫폼',
       title1: '무료 Markdown',
       title2: '풀세트.',
       subtagline: '원하는 기능, 전부 내장. 라이브 미리보기, Wiki 링크, 로컬 RAG, BYOK AI, 테마, Pomodoro, 크로스 플랫폼 동기화.',
@@ -957,7 +980,7 @@ export const t = {
       ctaWhatsNew: 'v4 새 기능 →',
       chips: ['📝 라이브 미리보기', '🔗 Wiki 링크', '🤖 BYOK AI', '🔍 로컬 RAG', '🎨 테마', '📱 크로스 플랫폼'],
       demoAlt: 'SoloMD v4 — Agent 패널 + Recipe 기록 + Trace 뷰',
-      androidBeta: '🤖 Android 베타 테스터 모집 중 → lixd220@gmail.com 으로 이메일',
+      androidBeta: '🤖 Android 베타 테스터 모집 중 — 테스트 그룹 참여',
     },
     features: {
       heading1: 'Markdown 폴더.',
@@ -1005,7 +1028,8 @@ export const t = {
       lead: '무료, 오픈 소스. MIT 라이선스. 계정 불필요.',
       platforms: {
         macos: { name: 'macOS', note: '유니버설 · Apple Silicon + Intel · Notarize 완료', primary: '.dmg 다운로드' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi 다운로드', secondary: '.exe 인스톨러' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi 다운로드' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon에서 Win', primary: '.msi 다운로드' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage 다운로드', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM 서버', primary: '.AppImage 다운로드', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play 스토어', primary: '.apk 다운로드', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -1073,6 +1097,10 @@ export const t = {
         { q: '왜 첫 실행에서 "Windows에서 PC 보호"가 떴나요?', a: 'SoloMD는 아직 Microsoft SmartScreen 평판이 쌓이지 않은 작은 오픈 소스 프로젝트. "추가 정보 → 실행"을 한 번 클릭하면 다시 묻지 않습니다. 코드 서명 인증서를 작업 중입니다.' },
         { q: '.md 파일을 SoloMD로 기본 열기로 설정하려면?', a: '.md 파일을 우클릭 → 연결 프로그램 → SoloMD → "항상 이 앱 사용" 체크. 동봉된 인스톨러는 .md / .markdown / .mdown / .mkd / .txt 확장자의 핸들러로 SoloMD를 등록합니다.' },
         { q: 'SoloMD와 Obsidian의 차이는?', a: 'Obsidian은 vault, wiki link, backlinks, 그래프 뷰, 플러그인 마켓플레이스가 있는 지식 관리 도구. SoloMD는 Markdown 파일을 쓰기 위한 가벼운 에디터 —— 하지만 Obsidian이 기본 제공하지 않는 일부를 출시 (core의 시맨틱 검색, AutoGit, MCP 서버, 한 패널의 14개 AI Provider). 플러그인 마켓플레이스 있는 두 번째 뇌를 원하면 Obsidian, 플러그인 세금 없는 작성 도구를 원하면 SoloMD.' },
+        {
+          q: '시스템 요구 사항은 무엇인가요? Windows 7에서 실행되나요?',
+          a: 'SoloMD는 Windows 10 이상, macOS 10.15+, 주요 Linux 배포판, iOS 15+, Android 7+가 필요합니다. Windows 7/8/8.1은 지원할 수 없으며 사용 가능한 구버전도 없습니다: SoloMD를 빌드하는 Rust 툴체인은 1.78부터 Windows 10을 요구하고, Microsoft는 Windows 7용 WebView2(렌더링 엔진)를 109 버전에서 동결하고 보안 업데이트를 중단했습니다.',
+        },
       ],
     },
     sponsor: {
@@ -1178,7 +1206,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · gerade veröffentlicht · MIT · 5 Plattformen',
+      badge: 'v4.11.9 · gerade veröffentlicht · MIT · 5 Plattformen',
       title1: 'Das kostenlose',
       title2: 'Markdown-Komplettpaket.',
       subtagline: 'Alles, was du brauchst — eingebaut. Live-Vorschau, Wiki-Links, lokales RAG, BYOK-KI, Themes, Pomodoro, plattformübergreifende Sync.',
@@ -1193,7 +1221,7 @@ export const t = {
       ctaWhatsNew: 'Neu in v4 →',
       chips: ['📝 Live-Vorschau', '🔗 Wiki-Links', '🤖 BYOK KI', '🔍 Lokales RAG', '🎨 Themes', '📱 Plattformübergreifend'],
       demoAlt: 'SoloMD v4 — Agent-Panel + Recipe-Verlauf + Trace-Ansicht',
-      androidBeta: '🤖 Android-Beta sucht Tester → E-Mail an lixd220@gmail.com',
+      androidBeta: '🤖 Android-Beta sucht Tester — der Testgruppe beitreten',
     },
     features: {
       heading1: 'Ein Ordner mit Markdown.',
@@ -1241,7 +1269,8 @@ export const t = {
       lead: 'Kostenlos und Open Source. MIT-Lizenz. Kein Konto erforderlich.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarisiert', primary: '.dmg herunterladen' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi herunterladen', secondary: '.exe Installer' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi herunterladen' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win auf Apple Silicon', primary: '.msi herunterladen' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage herunterladen', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-Server', primary: '.AppImage herunterladen', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Universal .apk herunterladen', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -1309,6 +1338,10 @@ export const t = {
         { q: 'Warum poppt "Windows hat Ihren PC geschützt" beim ersten Start auf?', a: 'SoloMD ist ein kleines Open-Source-Projekt, das noch keine Microsoft SmartScreen-Reputation aufgebaut hat. Klicken Sie einmal auf "Mehr Infos → Trotzdem ausführen" und es wird nicht mehr abfragen. Wir arbeiten an einem Code-Signing-Zertifikat.' },
         { q: 'Wie öffne ich .md-Dateien standardmäßig mit SoloMD?', a: 'Rechtsklick auf eine .md-Datei → Öffnen mit → SoloMD → "Immer diese App verwenden" anhaken. Der gebündelte Installer registriert SoloMD als Handler für .md, .markdown, .mdown, .mkd und .txt-Erweiterungen.' },
         { q: 'Was ist der Unterschied zwischen SoloMD und Obsidian?', a: 'Obsidian ist ein Wissensmanagement-Tool mit Vaults, Wiki-Links, Backlinks, einer Graph-Ansicht und einem Plugin-Marktplatz. SoloMD ist ein leichtgewichtiger Editor zum Schreiben von Markdown-Dateien — aber es liefert einige Dinge, die Obsidian nicht hat (semantische Suche im Kern, AutoGit, MCP-Server, 14 AI-Provider in einem Panel). Verwenden Sie Obsidian, wenn Sie ein zweites Gehirn mit Plugin-Marktplatz wollen; verwenden Sie SoloMD, wenn Sie die Schreibwerkzeuge ohne Plugin-Tax wollen.' },
+        {
+          q: 'Was sind die Systemanforderungen? Läuft SoloMD unter Windows 7?',
+          a: 'SoloMD benötigt Windows 10 oder neuer, macOS 10.15+, eine aktuelle Linux-Distribution, iOS 15+ oder Android 7+. Windows 7/8/8.1 können nicht unterstützt werden, und es existiert kein lauffähiger älterer Build: Die Rust-Toolchain erfordert seit 1.78 Windows 10, und Microsoft hat WebView2 — die Rendering-Engine von SoloMD — unter Windows 7 bei Version 109 ohne weitere Sicherheitsupdates eingefroren.',
+        },
       ],
     },
     sponsor: {
@@ -1414,7 +1447,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · vient de sortir · MIT · 5 plateformes',
+      badge: 'v4.11.9 · vient de sortir · MIT · 5 plateformes',
       title1: 'Le Markdown gratuit',
       title2: 'tout-en-un.',
       subtagline: 'Tout ce dont vous avez besoin, intégré. Aperçu en direct, liens Wiki, RAG local, IA BYOK, thèmes, Pomodoro, synchronisation multiplateforme.',
@@ -1429,7 +1462,7 @@ export const t = {
       ctaWhatsNew: 'Nouveautés v4 →',
       chips: ['📝 Aperçu en direct', '🔗 Liens Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Thèmes', '📱 Multiplateforme'],
       demoAlt: 'SoloMD v4 — Panneau Agent + historique Recipe + vue Trace',
-      androidBeta: '🤖 La bêta Android recrute → email à lixd220@gmail.com',
+      androidBeta: '🤖 La bêta Android recrute — rejoindre le groupe de test',
     },
     features: {
       heading1: 'Un dossier de markdown.',
@@ -1477,7 +1510,8 @@ export const t = {
       lead: 'Gratuit et open source. Licence MIT. Pas de compte nécessaire.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarisé', primary: 'Télécharger .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Télécharger .msi', secondary: 'Installateur .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Télécharger .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win sur Apple Silicon', primary: 'Télécharger .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Télécharger .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · serveurs ARM', primary: 'Télécharger .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Télécharger .apk universel', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -1545,6 +1579,10 @@ export const t = {
         { q: 'Pourquoi « Windows a protégé votre PC » est-il apparu au premier lancement ?', a: 'SoloMD est un petit projet open source qui n\'a pas encore construit de réputation Microsoft SmartScreen. Cliquer « Plus d\'infos → Exécuter quand même » une fois et il ne demandera plus. Nous travaillons sur un certificat de signature de code.' },
         { q: 'Comment ouvrir les fichiers .md avec SoloMD par défaut ?', a: 'Clic droit sur n\'importe quel fichier .md → Ouvrir avec → SoloMD → cocher « Toujours utiliser cette app ». L\'installateur empaqueté enregistre SoloMD comme handler pour les extensions .md, .markdown, .mdown, .mkd et .txt.' },
         { q: 'Quelle est la différence entre SoloMD et Obsidian ?', a: 'Obsidian est un outil de gestion de connaissances avec vaults, liens wiki, backlinks, vue graphique et marketplace de plugins. SoloMD est un éditeur léger pour écrire des fichiers Markdown — mais il livre certaines choses qu\'Obsidian n\'a pas (recherche sémantique dans le core, AutoGit, serveur MCP, 14 providers IA dans un panneau). Utilisez Obsidian si vous voulez un second cerveau avec marketplace de plugins ; utilisez SoloMD si vous voulez les outils d\'écriture sans la plugin tax.' },
+        {
+          q: 'Quelle est la configuration requise ? SoloMD fonctionne-t-il sous Windows 7 ?',
+          a: 'SoloMD nécessite Windows 10 ou ultérieur, macOS 10.15+, une distribution Linux récente, iOS 15+ ou Android 7+. Windows 7/8/8.1 ne peuvent pas être pris en charge et aucune version antérieure fonctionnelle n\'existe : la chaîne d\'outils Rust exige Windows 10 depuis la 1.78, et Microsoft a gelé WebView2 — le moteur de rendu de SoloMD — à la version 109 sous Windows 7, sans mises à jour de sécurité.',
+        },
       ],
     },
     sponsor: {
@@ -1650,7 +1688,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · recién lanzado · MIT · 5 plataformas',
+      badge: 'v4.11.9 · recién lanzado · MIT · 5 plataformas',
       title1: 'El Markdown gratis',
       title2: 'todo en uno.',
       subtagline: 'Todo lo que necesitas, integrado. Vista previa en vivo, enlaces Wiki, RAG local, IA BYOK, temas, Pomodoro, sincronización multiplataforma.',
@@ -1665,7 +1703,7 @@ export const t = {
       ctaWhatsNew: 'Novedades v4 →',
       chips: ['📝 Vista previa', '🔗 Enlaces Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Temas', '📱 Multiplataforma'],
       demoAlt: 'SoloMD v4 — Panel Agent + historial de Recipe + vista Trace',
-      androidBeta: '🤖 Beta Android busca testers → email a lixd220@gmail.com',
+      androidBeta: '🤖 Beta Android busca testers — únete al grupo de prueba',
     },
     features: {
       heading1: 'Una carpeta de markdown.',
@@ -1713,7 +1751,8 @@ export const t = {
       lead: 'Gratis y código abierto. Licencia MIT. No se necesita cuenta.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizado', primary: 'Descargar .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Descargar .msi', secondary: 'Instalador .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Descargar .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win en Apple Silicon', primary: 'Descargar .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Descargar .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · servidores ARM', primary: 'Descargar .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Descargar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -1781,6 +1820,10 @@ export const t = {
         { q: '¿Por qué apareció "Windows ha protegido tu PC" en el primer lanzamiento?', a: 'SoloMD es un pequeño proyecto de código abierto que aún no ha construido reputación de Microsoft SmartScreen. Haz clic en "Más información → Ejecutar de todas formas" una vez y no preguntará de nuevo. Estamos trabajando en un certificado de firma de código.' },
         { q: '¿Cómo abro archivos .md con SoloMD por defecto?', a: 'Clic derecho en cualquier archivo .md → Abrir con → SoloMD → marcar "Usar siempre esta app". El instalador empaquetado registra SoloMD como handler para extensiones .md, .markdown, .mdown, .mkd y .txt.' },
         { q: '¿Cuál es la diferencia entre SoloMD y Obsidian?', a: 'Obsidian es una herramienta de gestión de conocimientos con vaults, enlaces wiki, backlinks, vista de grafo y un marketplace de plugins. SoloMD es un editor ligero para escribir archivos Markdown — pero trae algunas cosas que Obsidian no tiene (búsqueda semántica en core, AutoGit, servidor MCP, 14 providers IA en un panel). Usa Obsidian si quieres un segundo cerebro con marketplace de plugins; usa SoloMD si quieres las herramientas de escritura sin el plugin tax.' },
+        {
+          q: '¿Cuáles son los requisitos del sistema? ¿Funciona SoloMD en Windows 7?',
+          a: 'SoloMD requiere Windows 10 o posterior, macOS 10.15+, una distribución Linux actual, iOS 15+ o Android 7+. Windows 7/8/8.1 no pueden ser compatibles y no existe ninguna versión antigua utilizable: la cadena de herramientas de Rust exige Windows 10 desde la 1.78, y Microsoft congeló WebView2 — el motor de renderizado de SoloMD — en la versión 109 para Windows 7, sin más actualizaciones de seguridad.',
+        },
       ],
     },
     sponsor: {
@@ -1886,7 +1929,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · acabou de sair · MIT · 5 plataformas',
+      badge: 'v4.11.9 · acabou de sair · MIT · 5 plataformas',
       title1: 'O Markdown grátis',
       title2: 'pacote completo.',
       subtagline: 'Tudo o que você precisa, integrado. Pré-visualização ao vivo, links Wiki, RAG local, IA BYOK, temas, Pomodoro, sincronização multiplataforma.',
@@ -1901,7 +1944,7 @@ export const t = {
       ctaWhatsNew: 'Novidades v4 →',
       chips: ['📝 Pré-visualização', '🔗 Links Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Temas', '📱 Multiplataforma'],
       demoAlt: 'SoloMD v4 — Painel Agent + histórico de Recipe + visualização de Trace',
-      androidBeta: '🤖 Beta Android recruta testers → email lixd220@gmail.com',
+      androidBeta: '🤖 Beta Android recruta testers — entrar no grupo de teste',
     },
     features: {
       heading1: 'Uma pasta de markdown.',
@@ -1949,7 +1992,8 @@ export const t = {
       lead: 'Grátis e código aberto. Licença MIT. Sem necessidade de conta.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizado', primary: 'Baixar .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Baixar .msi', secondary: 'Instalador .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Baixar .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win em Apple Silicon', primary: 'Baixar .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Baixar .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · servidores ARM', primary: 'Baixar .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Baixar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -2017,6 +2061,10 @@ export const t = {
         { q: 'Por que "Windows protegeu seu PC" apareceu na primeira execução?', a: 'O SoloMD é um pequeno projeto open-source que ainda não construiu reputação no Microsoft SmartScreen. Clique "Mais informações → Executar mesmo assim" uma vez e ele não vai pedir de novo. Estamos trabalhando em um certificado de assinatura de código.' },
         { q: 'Como abro arquivos .md com SoloMD por padrão?', a: 'Clique direito em qualquer arquivo .md → Abrir com → SoloMD → marque "Sempre usar este app". O instalador empacotado registra o SoloMD como handler para extensões .md, .markdown, .mdown, .mkd e .txt.' },
         { q: 'Qual a diferença entre SoloMD e Obsidian?', a: 'Obsidian é uma ferramenta de gestão de conhecimento com vaults, links wiki, backlinks, visualização de grafo e marketplace de plugins. SoloMD é um editor leve para escrever arquivos Markdown — mas entrega algumas coisas que Obsidian não tem (busca semântica no core, AutoGit, servidor MCP, 14 providers IA em um painel). Use Obsidian se você quer um segundo cérebro com marketplace de plugins; use SoloMD se você quer as ferramentas de escrita sem o plugin tax.' },
+        {
+          q: 'Quais são os requisitos de sistema? O SoloMD funciona no Windows 7?',
+          a: 'O SoloMD requer Windows 10 ou superior, macOS 10.15+, uma distribuição Linux atual, iOS 15+ ou Android 7+. Windows 7/8/8.1 não podem ser suportados e não existe build antiga utilizável: a toolchain Rust exige Windows 10 desde a 1.78, e a Microsoft congelou o WebView2 — o motor de renderização do SoloMD — na versão 109 no Windows 7, sem mais atualizações de segurança.',
+        },
       ],
     },
     sponsor: {
@@ -2122,7 +2170,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · appena rilasciato · MIT · 5 piattaforme',
+      badge: 'v4.11.9 · appena rilasciato · MIT · 5 piattaforme',
       title1: 'Il Markdown gratuito',
       title2: 'tutto incluso.',
       subtagline: 'Tutto quello che ti serve, integrato. Anteprima dal vivo, link Wiki, RAG locale, IA BYOK, temi, Pomodoro, sincronizzazione multipiattaforma.',
@@ -2137,7 +2185,7 @@ export const t = {
       ctaWhatsNew: 'Novità v4 →',
       chips: ['📝 Anteprima dal vivo', '🔗 Link Wiki', '🤖 IA BYOK', '🔍 RAG locale', '🎨 Temi', '📱 Multipiattaforma'],
       demoAlt: 'SoloMD v4 — Pannello Agent + cronologia Recipe + vista Trace',
-      androidBeta: '🤖 Beta Android cerca tester → email a lixd220@gmail.com',
+      androidBeta: '🤖 Beta Android cerca tester — unisciti al gruppo di test',
     },
     features: {
       heading1: 'Una cartella di markdown.',
@@ -2185,7 +2233,8 @@ export const t = {
       lead: 'Gratis e open source. Licenza MIT. Nessun account necessario.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizzato', primary: 'Scarica .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Scarica .msi', secondary: 'Installer .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Scarica .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win su Apple Silicon', primary: 'Scarica .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Scarica .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · server ARM', primary: 'Scarica .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Scarica .apk universale', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -2253,6 +2302,10 @@ export const t = {
         { q: 'Perché "Windows ha protetto il PC" è apparso al primo avvio?', a: 'SoloMD è un piccolo progetto open-source che non ha ancora costruito reputazione Microsoft SmartScreen. Clicca "Maggiori informazioni → Esegui comunque" una volta e non ti chiederà di nuovo. Stiamo lavorando a un certificato di firma codice.' },
         { q: 'Come apro file .md con SoloMD predefinito?', a: 'Clic destro su qualsiasi file .md → Apri con → SoloMD → spunta "Usa sempre questa app". L\'installer empacchettato registra SoloMD come handler per le estensioni .md, .markdown, .mdown, .mkd e .txt.' },
         { q: 'Qual è la differenza tra SoloMD e Obsidian?', a: 'Obsidian è uno strumento di gestione conoscenza con vault, link wiki, backlinks, vista grafico e marketplace di plugin. SoloMD è un editor leggero per scrivere file Markdown — ma spedisce alcune cose che Obsidian non ha (ricerca semantica nel core, AutoGit, server MCP, 14 provider AI in un pannello). Usa Obsidian se vuoi un secondo cervello con marketplace di plugin; usa SoloMD se vuoi gli strumenti di scrittura senza il plugin tax.' },
+        {
+          q: 'Quali sono i requisiti di sistema? SoloMD funziona su Windows 7?',
+          a: 'SoloMD richiede Windows 10 o successivo, macOS 10.15+, una distribuzione Linux recente, iOS 15+ o Android 7+. Windows 7/8/8.1 non possono essere supportati e non esiste una build precedente utilizzabile: la toolchain Rust richiede Windows 10 dalla 1.78 e Microsoft ha congelato WebView2 — il motore di rendering di SoloMD — alla versione 109 su Windows 7, senza ulteriori aggiornamenti di sicurezza.',
+        },
       ],
     },
     sponsor: {
@@ -2358,7 +2411,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · świeża premiera · MIT · 5 platform',
+      badge: 'v4.11.9 · świeża premiera · MIT · 5 platform',
       title1: 'Darmowy Markdown',
       title2: 'wszystko w jednym.',
       subtagline: 'Wszystko, czego potrzebujesz — wbudowane. Podgląd na żywo, linki Wiki, lokalny RAG, BYOK AI, motywy, Pomodoro, synchronizacja wieloplatformowa.',
@@ -2373,7 +2426,7 @@ export const t = {
       ctaWhatsNew: 'Co nowego w v4 →',
       chips: ['📝 Podgląd na żywo', '🔗 Linki Wiki', '🤖 BYOK AI', '🔍 Lokalny RAG', '🎨 Motywy', '📱 Wieloplatformowy'],
       demoAlt: 'SoloMD v4 — panel Agent + historia Recipe + widok Trace',
-      androidBeta: '🤖 Beta Android szuka testerów → email do lixd220@gmail.com',
+      androidBeta: '🤖 Beta Android szuka testerów — dołącz do grupy testowej',
     },
     features: {
       heading1: 'Jeden katalog plików markdown.',
@@ -2421,7 +2474,8 @@ export const t = {
       lead: 'Darmowy i open source. Licencja MIT. Konto nie jest potrzebne.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarized', primary: 'Pobierz .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Pobierz .msi', secondary: 'Instalator .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Pobierz .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · komputery Copilot+ · Win na Apple Silicon', primary: 'Pobierz .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Pobierz .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · serwery ARM', primary: 'Pobierz .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Sklep Play', primary: 'Pobierz uniwersalny .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -2489,6 +2543,10 @@ export const t = {
         { q: 'Dlaczego przy pierwszym uruchomieniu pojawiło się „System Windows ochronił komputer”?', a: 'SoloMD to mały projekt open source, który nie zbudował jeszcze reputacji w Microsoft SmartScreen. Kliknij raz „Więcej informacji → Uruchom mimo to” i więcej cię nie zapyta. Pracujemy nad certyfikatem do podpisywania kodu.' },
         { q: 'Jak otworzyć pliki .md domyślnie w SoloMD?', a: 'Prawy klik na dowolnym pliku .md → Otwórz za pomocą → SoloMD → zaznacz „Zawsze używaj tej aplikacji”. Dołączony instalator rejestruje SoloMD jako handler dla rozszerzeń .md, .markdown, .mdown, .mkd i .txt.' },
         { q: 'Czym SoloMD różni się od Obsidiana?', a: 'Obsidian to narzędzie do zarządzania wiedzą z vaultami, wikilinkami, backlinkami, widokiem grafu i marketplace’em pluginów. SoloMD to lekki edytor do pisania plików Markdown — ale dostarcza kilka rzeczy, których Obsidian nie ma (wyszukiwanie semantyczne w core, AutoGit, serwer MCP, 14 dostawców AI w jednym panelu). Wybierz Obsidian, jeśli chcesz drugi mózg z marketplace’em pluginów; wybierz SoloMD, jeśli chcesz narzędzia do pisania bez plugin tax.' },
+        {
+          q: 'Jakie są wymagania systemowe? Czy SoloMD działa na Windows 7?',
+          a: 'SoloMD wymaga Windows 10 lub nowszego, macOS 10.15+, aktualnej dystrybucji Linuksa, iOS 15+ lub Androida 7+. Windows 7/8/8.1 nie mogą być wspierane i nie istnieje działająca starsza wersja: toolchain Rust od wersji 1.78 wymaga Windows 10, a Microsoft zamroził WebView2 — silnik renderujący SoloMD — na wersji 109 dla Windows 7, bez dalszych aktualizacji bezpieczeństwa.',
+        },
       ],
     },
     sponsor: {
@@ -2594,7 +2652,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · zojuist uitgebracht · MIT · 5 platforms',
+      badge: 'v4.11.9 · zojuist uitgebracht · MIT · 5 platforms',
       title1: 'De gratis Markdown',
       title2: 'alles-in-één.',
       subtagline: 'Alles wat je nodig hebt, ingebouwd. Live preview, Wiki-links, lokale RAG, BYOK AI, thema\'s, Pomodoro, platformoverschrijdende synchronisatie.',
@@ -2609,7 +2667,7 @@ export const t = {
       ctaWhatsNew: 'Nieuw in v4 →',
       chips: ['📝 Live preview', '🔗 Wiki-links', '🤖 BYOK AI', '🔍 Lokale RAG', '🎨 Themes', '📱 Cross-platform'],
       demoAlt: 'SoloMD v4 — Agent Panel + Recipe-geschiedenis + Trace-weergave',
-      androidBeta: '🤖 Android-bèta zoekt testers → email lixd220@gmail.com',
+      androidBeta: '🤖 Android-bèta zoekt testers — word lid van de testgroep',
     },
     features: {
       heading1: 'Eén map met markdown.',
@@ -2657,7 +2715,8 @@ export const t = {
       lead: 'Gratis en open source. MIT-licentie. Geen account nodig.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · genotariseerd', primary: 'Download .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi', secondary: '.exe-installer' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win op Apple Silicon', primary: 'Download .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Download .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-servers', primary: 'Download .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Universele .apk downloaden', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -2725,6 +2784,10 @@ export const t = {
         { q: 'Waarom verscheen "Windows heeft je pc beveiligd" bij de eerste start?', a: 'SoloMD is een klein open-source project dat nog geen reputatie heeft opgebouwd in Microsoft SmartScreen. Klik op "Meer informatie → Toch uitvoeren" één keer en het zal het je niet opnieuw vragen. We werken aan een code-signing certificaat.' },
         { q: 'Hoe open ik .md-bestanden standaard met SoloMD?', a: 'Rechtsklik op een .md-bestand → Openen met → SoloMD → vink "Altijd deze app gebruiken" aan. De gebundelde installer registreert SoloMD als handler voor de extensies .md, .markdown, .mdown, .mkd en .txt.' },
         { q: 'Wat is het verschil tussen SoloMD en Obsidian?', a: 'Obsidian is een knowledge-management-tool met vaults, wiki-links, backlinks, graph-view en plugin-marketplace. SoloMD is een lichtgewicht editor om Markdown-bestanden te schrijven — maar levert wel een paar dingen die Obsidian niet heeft (semantisch zoeken in de core, AutoGit, MCP-server, 14 AI-providers in één paneel). Gebruik Obsidian als je een second brain met plugin-marketplace wilt; gebruik SoloMD als je de schrijftools zonder plugin-tax wilt.' },
+        {
+          q: 'Wat zijn de systeemvereisten? Draait SoloMD op Windows 7?',
+          a: 'SoloMD vereist Windows 10 of nieuwer, macOS 10.15+, een actuele Linux-distributie, iOS 15+ of Android 7+. Windows 7/8/8.1 kunnen niet worden ondersteund en er bestaat geen bruikbare oudere build: de Rust-toolchain vereist sinds 1.78 Windows 10, en Microsoft heeft WebView2 — de rendering-engine van SoloMD — op Windows 7 bevroren op versie 109, zonder verdere beveiligingsupdates.',
+        },
       ],
     },
     sponsor: {
@@ -2830,7 +2893,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · yeni yayımlandı · MIT · 5 platform',
+      badge: 'v4.11.9 · yeni yayımlandı · MIT · 5 platform',
       title1: 'Ücretsiz Markdown',
       title2: 'tam paket.',
       subtagline: 'İhtiyacınız olan her şey, dahili. Canlı önizleme, Wiki bağlantıları, yerel RAG, BYOK AI, temalar, Pomodoro, çoklu platform senkronizasyonu.',
@@ -2845,7 +2908,7 @@ export const t = {
       ctaWhatsNew: 'v4 yenilikleri →',
       chips: ['📝 Canlı önizleme', '🔗 Wiki bağlantıları', '🤖 BYOK AI', '🔍 Yerel RAG', '🎨 Temalar', '📱 Çoklu platform'],
       demoAlt: 'SoloMD v4 — Agent Paneli + Recipe geçmişi + Trace görünümü',
-      androidBeta: '🤖 Android beta test edici arıyor → e-posta lixd220@gmail.com',
+      androidBeta: '🤖 Android beta test edici arıyor — test grubuna katıl',
     },
     features: {
       heading1: 'Bir markdown klasörü.',
@@ -2893,7 +2956,8 @@ export const t = {
       lead: 'Ücretsiz ve açık kaynak. MIT lisansı. Hesap gerekmez.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · noter onaylı', primary: '.dmg indir' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi indir', secondary: '.exe yükleyici' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi indir' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon\'da Win', primary: '.msi indir' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage indir', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM sunucular', primary: '.AppImage indir', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Evrensel .apk indir', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -2961,6 +3025,10 @@ export const t = {
         { q: 'İlk başlatmada neden "Windows bilgisayarınızı korudu" çıktı?', a: 'SoloMD, henüz Microsoft SmartScreen itibarı oluşturmamış küçük bir açık kaynak projesidir. "Daha fazla bilgi → Yine de çalıştır"a bir kez tıkla ve seni bir daha sormaz. Bir kod imzalama sertifikası üzerinde çalışıyoruz.' },
         { q: '.md dosyalarını varsayılan olarak SoloMD ile nasıl açarım?', a: 'Herhangi bir .md dosyasına sağ tık → Birlikte aç → SoloMD → "Bu uygulamayı her zaman kullan"ı işaretle. Paketlenmiş yükleyici, SoloMD\'yi .md, .markdown, .mdown, .mkd ve .txt uzantıları için handler olarak kaydeder.' },
         { q: 'SoloMD ile Obsidian arasındaki fark nedir?', a: 'Obsidian; vault\'lar, wiki linkleri, backlink\'ler, graph görünümü ve plugin marketplace\'i olan bir bilgi yönetim aracıdır. SoloMD, Markdown dosyaları yazmak için hafif bir editördür — ama Obsidian\'ın sahip olmadığı bazı şeyleri sunar (çekirdekte anlamsal arama, AutoGit, MCP sunucusu, tek panelde 14 AI sağlayıcısı). Plugin marketplace\'i olan ikinci bir beyin istiyorsan Obsidian kullan; plugin vergisi olmadan yazım araçları istiyorsan SoloMD kullan.' },
+        {
+          q: 'Sistem gereksinimleri nelerdir? SoloMD Windows 7\'de çalışır mı?',
+          a: 'SoloMD, Windows 10 veya üzeri, macOS 10.15+, güncel bir Linux dağıtımı, iOS 15+ veya Android 7+ gerektirir. Windows 7/8/8.1 desteklenemez ve çalışan eski bir sürüm de yoktur: Rust araç zinciri 1.78\'den beri Windows 10 gerektirir ve Microsoft, SoloMD\'nin işleme motoru WebView2\'yi Windows 7\'de 109 sürümünde dondurmuş, güvenlik güncellemelerini durdurmuştur.',
+        },
       ],
     },
     sponsor: {
@@ -3066,7 +3134,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · just släppt · MIT · 5 plattformar',
+      badge: 'v4.11.9 · just släppt · MIT · 5 plattformar',
       title1: 'Den gratis Markdown',
       title2: 'allt-i-ett.',
       subtagline: 'Allt du behöver, inbyggt. Live-förhandsvisning, Wiki-länkar, lokal RAG, BYOK AI, teman, Pomodoro, plattformsoberoende synk.',
@@ -3081,7 +3149,7 @@ export const t = {
       ctaWhatsNew: 'Nyheter i v4 →',
       chips: ['📝 Live-förhandsvisning', '🔗 Wiki-länkar', '🤖 BYOK AI', '🔍 Lokal RAG', '🎨 Teman', '📱 Plattformsoberoende'],
       demoAlt: 'SoloMD v4 — Agent-panel + Recipe-historik + Trace-vy',
-      androidBeta: '🤖 Android-beta söker testare → mejla lixd220@gmail.com',
+      androidBeta: '🤖 Android-beta söker testare — gå med i testgruppen',
     },
     features: {
       heading1: 'En mapp med markdown.',
@@ -3129,7 +3197,8 @@ export const t = {
       lead: 'Gratis och öppen källkod. MIT-licens. Inget konto behövs.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notariserad', primary: 'Ladda ner .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Ladda ner .msi', secondary: '.exe-installer' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Ladda ner .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win på Apple Silicon', primary: 'Ladda ner .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Ladda ner .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-servrar', primary: 'Ladda ner .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Ladda ner universell .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -3197,6 +3266,10 @@ export const t = {
         { q: 'Varför dök "Windows har skyddat din dator" upp vid första körning?', a: 'SoloMD är ett litet open source-projekt som ännu inte byggt upp Microsoft SmartScreen-rykte. Klicka "Mer information → Kör ändå" en gång så frågar det inte igen. Vi arbetar på ett kodsigneringscertifikat.' },
         { q: 'Hur öppnar jag .md-filer med SoloMD som standard?', a: 'Högerklicka på valfri .md-fil → Öppna med → SoloMD → bocka i "Använd alltid den här appen". Den medföljande installern registrerar SoloMD som hanterare för filändelserna .md, .markdown, .mdown, .mkd och .txt.' },
         { q: 'Vad är skillnaden mellan SoloMD och Obsidian?', a: 'Obsidian är ett kunskapshanteringsverktyg med vault, wikilänkar, backlinks, grafvy och plugin-marknad. SoloMD är en lättviktig editor för att skriva Markdown-filer — men levererar några saker Obsidian inte har (semantisk sökning i kärnan, AutoGit, MCP-server, 14 AI-leverantörer i en panel). Använd Obsidian om du vill ha en andra hjärna med plugin-marknad; använd SoloMD om du vill ha skrivverktygen utan plugin-skatten.' },
+        {
+          q: 'Vilka är systemkraven? Fungerar SoloMD på Windows 7?',
+          a: 'SoloMD kräver Windows 10 eller senare, macOS 10.15+, en aktuell Linux-distribution, iOS 15+ eller Android 7+. Windows 7/8/8.1 kan inte stödjas och ingen användbar äldre version finns: Rust-verktygskedjan kräver Windows 10 sedan 1.78, och Microsoft har fryst WebView2 — SoloMD:s renderingsmotor — på version 109 för Windows 7, utan fler säkerhetsuppdateringar.',
+        },
       ],
     },
     sponsor: {
@@ -3302,7 +3375,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.2.0 · щойно випущено · MIT · 5 платформ',
+      badge: 'v4.11.9 · щойно випущено · MIT · 5 платформ',
       title1: 'Безкоштовний Markdown',
       title2: 'все в одному.',
       subtagline: 'Усе, що вам потрібно, вбудовано. Живий перегляд, Wiki-посилання, локальний RAG, BYOK AI, теми, Pomodoro, кросплатформенна синхронізація.',
@@ -3317,7 +3390,7 @@ export const t = {
       ctaWhatsNew: 'Що нового у v4 →',
       chips: ['📝 Живий перегляд', '🔗 Wiki-посилання', '🤖 BYOK AI', '🔍 Локальний RAG', '🎨 Теми', '📱 Кросплатформенний'],
       demoAlt: 'SoloMD v4 — панель Agent + історія Recipe + перегляд Trace',
-      androidBeta: '🤖 Android бета шукає тестерів → email lixd220@gmail.com',
+      androidBeta: '🤖 Android бета шукає тестерів — приєднатися до тест-групи',
     },
     features: {
       heading1: 'Одна тека з markdown.',
@@ -3365,7 +3438,8 @@ export const t = {
       lead: 'Безкоштовно та з відкритим кодом. Ліцензія MIT. Акаунт не потрібен.',
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · нотаризовано', primary: 'Завантажити .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Завантажити .msi', secondary: 'Інсталятор .exe' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Завантажити .msi' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Win на Apple Silicon', primary: 'Завантажити .msi' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Завантажити .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-сервери', primary: 'Завантажити .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
         android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Маркет', primary: 'Завантажити універсальний .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
@@ -3433,6 +3507,10 @@ export const t = {
         { q: 'Чому при першому запуску з\'явилося «Windows захистив ваш ПК»?', a: 'SoloMD — невеликий проєкт з відкритим кодом, який поки не набрав репутації Microsoft SmartScreen. Клацніть «Докладніше → Виконати в будь-якому випадку» один раз, і вас більше не питатимуть. Ми працюємо над сертифікатом підпису коду.' },
         { q: 'Як відкривати файли .md за замовчуванням SoloMD?', a: 'Правий клік на будь-якому .md файлі → Відкрити з → SoloMD → позначте «Завжди використовувати цю програму». Вбудований інсталятор реєструє SoloMD як обробник для розширень .md, .markdown, .mdown, .mkd і .txt.' },
         { q: 'Яка різниця між SoloMD і Obsidian?', a: 'Obsidian — інструмент керування знаннями з vault, wiki-посиланнями, backlinks, перегляду графа й plugin-маркетплейсом. SoloMD — легкий редактор для написання Markdown-файлів — але постачає деякі речі, яких в Obsidian немає (семантичний пошук у ядрі, AutoGit, MCP-сервер, 14 AI-провайдерів в одній панелі). Використовуйте Obsidian, якщо хочете другий мозок із plugin-маркетплейсом; використовуйте SoloMD, якщо хочете інструменти для письма без plugin tax.' },
+        {
+          q: 'Які системні вимоги? Чи працює SoloMD на Windows 7?',
+          a: 'SoloMD потребує Windows 10 або новішої, macOS 10.15+, актуального дистрибутива Linux, iOS 15+ або Android 7+. Windows 7/8/8.1 підтримувати неможливо, і придатної старої збірки не існує: інструментарій Rust від версії 1.78 вимагає Windows 10, а Microsoft заморозила WebView2 — рушій рендерингу SoloMD — на версії 109 для Windows 7 без подальших оновлень безпеки.',
+        },
       ],
     },
     sponsor: {

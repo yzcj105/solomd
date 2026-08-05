@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
+import { setMarkdownHardBreaks, setMarkdownAutoNumberHeadings } from './lib/markdown';
 import Toolbar from './components/Toolbar.vue';
 import TelemetryBanner from './components/TelemetryBanner.vue';
 import TileRoot from './components/TileRoot.vue';
@@ -13,18 +14,34 @@ import CommandPalette from './components/CommandPalette.vue';
 import QuickSwitcher from './components/QuickSwitcher.vue';
 import Outline from './components/Outline.vue';
 import BacklinksPanel from './components/BacklinksPanel.vue';
+import AndroidFolderPicker from './components/AndroidFolderPicker.vue';
+import NeighborhoodPanel from './components/NeighborhoodPanel.vue';
+import RelationshipsPanel from './components/RelationshipsPanel.vue';
 import TagsPanel from './components/TagsPanel.vue';
+import TypesPanel from './components/TypesPanel.vue';
 import HistoryPanel from './components/HistoryPanel.vue';
+import PropertiesInspector from './components/PropertiesInspector.vue';
 import AgentPanel from './components/AgentPanel.vue';
 import RsSplitter from './components/RsSplitter.vue';
 import { useAutoCommit } from './composables/useAutoCommit';
 import { useGithubSync } from './composables/useGithubSync';
 import { useSessionRestore } from './composables/useSessionRestore';
 import SessionRestoreDialog from './components/SessionRestoreDialog.vue';
+import WhiteboardOverlay from './components/WhiteboardOverlay.vue';
 import AIRewriteOverlay from './components/AIRewriteOverlay.vue';
 import BasesView from './components/BasesView.vue';
 import { BASES_OPEN_EVENT, BASES_CLOSE_EVENT } from './composables/useBasesView';
+import InboxView from './components/InboxView.vue';
+import { INBOX_OPEN_EVENT, INBOX_CLOSE_EVENT } from './composables/useInboxView';
+// v4.6.1 F2 — Type lens (center-pane filtered view of one type's members).
+import TypeLensView from './components/TypeLensView.vue';
+import { TYPE_LENS_OPEN_EVENT, TYPE_LENS_CLOSE_EVENT } from './composables/useTypeLens';
 import FileTree from './components/FileTree.vue';
+// v4.6 F5 — Saved filtered views (sidebar panel + filtered list + editor).
+import ViewsPanel from './components/ViewsPanel.vue';
+import ViewNoteList from './components/ViewNoteList.vue';
+import ViewEditorDialog from './components/ViewEditorDialog.vue';
+import { VIEW_OPEN_EVENT, VIEW_CLOSE_EVENT } from './composables/useSavedViews';
 import SettingsPanel from './components/SettingsPanel.vue';
 import MarkdownHelp from './components/MarkdownHelp.vue';
 import GlobalSearch from './components/GlobalSearch.vue';
@@ -35,9 +52,11 @@ import AboutDialog from './components/AboutDialog.vue';
 import AgentSetupWizard from './components/AgentSetupWizard.vue';
 import UnsavedDialog from './components/UnsavedDialog.vue';
 import FileChangedDialog from './components/FileChangedDialog.vue';
+import ImageUrlDialog from './components/ImageUrlDialog.vue';
 import Toast from './components/Toast.vue';
 import { useTabsStore } from './stores/tabs';
-import { useSettingsStore } from './stores/settings';
+import { useSettingsStore, buildEditorFontStack } from './stores/settings';
+import { useWindowsStore, isAuxLabel } from './stores/windows';
 import { useTilesStore } from './stores/tiles';
 import { usePomodoroStore } from './stores/pomodoro';
 import { useFiles } from './composables/useFiles';
@@ -45,22 +64,71 @@ import { useExport } from './composables/useExport';
 import { useShortcuts } from './composables/useShortcuts';
 import { useFileWatcher } from './composables/useFileWatcher';
 import { loadCustomTheme } from './lib/custom-theme';
-import { isIOS } from './lib/platform';
+import { isIOS, isMacOS, isAndroid, isMobile } from './lib/platform';
 import { useI18n } from './i18n';
 import { track } from './lib/telemetry';
 import { openWelcomeTour } from './lib/welcome-tour';
 import { useWorkspaceStore } from './stores/workspace';
 import { useWorkspaceIndexStore } from './stores/workspaceIndex';
+import { usePropertiesStore } from './stores/properties';
 import { useRagStore } from './stores/rag';
 import { IS_APP_STORE_BUILD } from './lib/app-build';
+import UiPreview from './components/UiPreview.vue';
+
+/* v4.6 dev-only UI gallery. `?uikit` renders ONLY the design-system preview
+ * and skips the normal app, so the token layer can be eyeballed in isolation.
+ * Pure read of location.search at module init — no effect on normal startup. */
+const showUiKit = new URLSearchParams(location.search).has('uikit');
 
 const tabs = useTabsStore();
 const settings = useSettingsStore();
+const windowsStore = useWindowsStore();
 const tiles = useTilesStore();
 const files = useFiles();
 const exporter = useExport();
 const workspace = useWorkspaceStore();
+
+// #148 / #151 — Android real-folder vault picking. useFiles.openFolder()
+// dispatches these events; the picker modal + permission request live here so
+// they can react to app-resume (the all-files grant happens in system Settings,
+// outside our process).
+const androidPickerOpen = ref(false);
+// Shown after an all-files grant that didn't take effect on the running
+// process (see the resume probe in onMounted); the app must restart so shared
+// storage re-mounts.
+const androidRestartNeeded = ref(false);
+async function doAndroidRestart() {
+  androidRestartNeeded.value = false;
+  try {
+    await invoke('android_restart_app');
+  } catch (e) {
+    const toasts = (await import('./stores/toasts')).useToastsStore();
+    toasts.error(String(e));
+  }
+}
+function onAndroidFolderPick(path: string) {
+  androidPickerOpen.value = false;
+  workspace.setFolder(path);
+  if (!settings.showFileTree) settings.toggleFileTree();
+}
+async function requestAndroidStorage() {
+  const toasts = (await import('./stores/toasts')).useToastsStore();
+  try {
+    // Mark that a grant round-trip is in flight; when we resume from Settings
+    // with the permission held, the onMounted visibilitychange handler restarts
+    // the app so the storage sandbox re-mounts (grant alone doesn't remount a
+    // running process — see android_restart_app).
+    localStorage.setItem('solomd:android-storage-pending', '1');
+    await invoke('android_request_all_files_access');
+    toasts.info(
+      '打开「允许管理所有文件 / All files access」后返回,App 会自动重启以让权限生效。',
+    );
+  } catch (e) {
+    toasts.error(String(e));
+  }
+}
 const workspaceIndex = useWorkspaceIndexStore();
+const properties = usePropertiesStore();
 const rag = useRagStore();
 const autoCommit = useAutoCommit();
 autoCommit.start();
@@ -82,13 +150,31 @@ pomodoro.rehydrate();
 // Pinia internals. Dev-only convenience — release builds ignore the
 // extra hook.
 (window as any).usePomodoroStore = usePomodoroStore;
-useI18n();
+const { t } = useI18n();
 
 const cursorLine = ref(1);
 const cursorCol = ref(1);
+// v4.3.0 issue #70: selection text from the editor, surfaced in StatusBar
+// as "selected: N words / M chars". Empty string when nothing is selected.
+const selectionText = ref('');
 const paletteOpen = ref(false);
 const quickSwitcherOpen = ref(false);
 const settingsOpen = ref(false);
+// "Image from URL" dialog (网络图片). Opened via the `solomd:open-image-url-
+// dialog` window event (toolbar Insert menu / command palette); on confirm it
+// dispatches `solomd:insert-image-url` to the focused pane's editor.
+const imageUrlDialogOpen = ref(false);
+function onOpenImageUrlDialog() {
+  imageUrlDialogOpen.value = true;
+}
+function onImageUrlConfirm(url: string, alt: string) {
+  imageUrlDialogOpen.value = false;
+  window.dispatchEvent(
+    new CustomEvent('solomd:insert-image-url', {
+      detail: { url, alt, paneId: tiles.focusedPaneId },
+    }),
+  );
+}
 // When a caller wants the Settings panel to land on a specific category
 // (e.g. the AI button → `integrations`), set this before opening; the
 // SettingsPanel watches it and switches activeCategory accordingly.
@@ -103,6 +189,52 @@ const searchOpen = ref(false);
 // from TagsPanel prefill `#tag` into the search box; the watcher in
 // GlobalSearch refocuses on every prefill change.
 const searchPrefill = ref<string | undefined>(undefined);
+
+// v4.3.0 PR #75 (beihai23) — right-click context menu on the sidebar gives
+// quick access to per-pane visibility toggles. Toggling off the last
+// visible pane auto-hides the whole sidebar (snapshotting the layout for
+// restore on next open); toggling one on while hidden brings it back.
+const sidebarCtx = ref<{ x: number; y: number } | null>(null);
+function openSidebarCtx(e: MouseEvent) {
+  e.preventDefault();
+  sidebarCtx.value = { x: e.clientX, y: e.clientY };
+}
+function closeSidebarCtx() { sidebarCtx.value = null; }
+
+function rsPaneSnapshot() {
+  return {
+    showBacklinks: settings.showBacklinks,
+    showRelationships: settings.showRelationships,
+    showTagsPanel: settings.showTagsPanel,
+    showNeighborhood: settings.showNeighborhood,
+    showTypesPanel: settings.showTypesPanel,
+    showHistoryPanel: settings.showHistoryPanel,
+    showAgentPanel: settings.showAgentPanel,
+  };
+}
+/** Run a pane toggle and reconcile sidebar visibility: hide it if the
+ *  toggle left no panes on, restore it if a hidden sidebar gained a pane. */
+function ctxToggle(toggleFn: () => void) {
+  const before = rsPaneSnapshot();
+  toggleFn();
+  const noPanesVisible =
+    !searchOpen.value &&
+    !showOutlinePane.value &&
+    !settings.showBacklinks &&
+    !settings.showRelationships &&
+    !settings.showTagsPanel &&
+    !showNeighborhoodPane.value &&
+    !settings.showTypesPanel &&
+    !settings.showHistoryPanel &&
+    (IS_APP_STORE_BUILD || !settings.showAgentPanel);
+  if (noPanesVisible) {
+    settings.hideRightSidebarFromPane(before);
+  } else if (settings.rightSidebarHidden) {
+    settings.ensureRightSidebarVisible();
+  }
+  closeSidebarCtx();
+}
+
 const ragSearchOpen = ref(false);
 const cjkProofreadOpen = ref(false);
 const aboutOpen = ref(false);
@@ -168,10 +300,71 @@ useShortcuts({
 
 useFileWatcher(showFileChangedDialog);
 
+// v4.6.2 — Ctrl/Cmd + mouse wheel zooms the whole app (Obsidian-style),
+// reusing the globalZoom axis so ⌘0 still resets it and it works in edit +
+// preview + split (window-level capture handler). Trackpad pinch also arrives
+// here (browsers set ctrlKey on pinch), so pinch-to-zoom works too. passive:false
+// lets us preventDefault so the page doesn't scroll while zooming.
+let lastWheelZoomAt = 0;
+function onWheelZoom(e: WheelEvent): void {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  if (e.deltaY === 0) return;
+  // #125 — a trackpad pinch / momentum wheel fires dozens of events per gesture;
+  // applying a 0.1 step to each rocketed the zoom and made the layout shake.
+  // Throttle to one step per ~60ms so zooming is smooth and controllable.
+  const now = Date.now();
+  if (now - lastWheelZoomAt < 60) return;
+  lastWheelZoomAt = now;
+  const dir = e.deltaY < 0 ? 1 : -1;
+  settings.setGlobalZoom((settings.globalZoom || 1) + dir * 0.1);
+}
+
 // Esc closes the topmost modal
+function onZoomShortcut(e: KeyboardEvent): boolean {
+  // Three independent zoom axes (v4.3.0 issue #72 + PR #74 yzcj105):
+  //   ⌘= / ⌘- / ⌘0           → globalZoom (whole app, CSS zoom)
+  //   ⌘⇧= / ⌘⇧- / ⌘⇧0        → editor font size only
+  //   ⌃⌘= / ⌃⌘- / ⌃⌘0        → preview font size only
+  // On macOS the same shortcuts are also exposed via native View menu
+  // accelerators (runner.rs) — this JS handler covers Linux/Windows and
+  // catches keys before the WebView's built-in browser zoom intercepts them.
+  const cmd = e.metaKey;          // macOS Cmd
+  const ctrlOnly = e.ctrlKey && !e.metaKey; // Linux/Win Ctrl (no Cmd present)
+  if (!cmd && !ctrlOnly) return false;
+  if (e.altKey) return false;
+
+  // Identify axis: Shift = editor; Cmd+Ctrl (both) = preview; otherwise UI.
+  let axis: 'ui' | 'editor' | 'preview' = 'ui';
+  if (e.shiftKey && !(e.metaKey && e.ctrlKey)) axis = 'editor';
+  else if (e.metaKey && e.ctrlKey) axis = 'preview';
+
+  const isIn = e.key === '=' || e.key === '+';
+  const isOut = e.key === '-' || e.key === '_';
+  const isReset = e.key === '0';
+  if (!isIn && !isOut && !isReset) return false;
+  e.preventDefault();
+  if (axis === 'editor') {
+    if (isIn) settings.editorFontIn();
+    else if (isOut) settings.editorFontOut();
+    else settings.resetEditorFontSize();
+  } else if (axis === 'preview') {
+    if (isIn) settings.previewFontIn();
+    else if (isOut) settings.previewFontOut();
+    else settings.resetPreviewFontSize();
+  } else {
+    if (isIn) settings.zoomIn();
+    else if (isOut) settings.zoomOut();
+    else settings.resetZoom();
+  }
+  return true;
+}
+
 function onEsc(e: KeyboardEvent) {
+  if (onZoomShortcut(e)) return;
   if (e.key !== 'Escape') return;
-  if (aboutOpen.value) aboutOpen.value = false;
+  if (sidebarCtx.value) sidebarCtx.value = null;
+  else if (aboutOpen.value) aboutOpen.value = false;
   else if (cjkProofreadOpen.value) cjkProofreadOpen.value = false;
   else if (ragSearchOpen.value) ragSearchOpen.value = false;
   else if (fileChangedOpen.value) fileChangedOpen.value = false;
@@ -188,6 +381,10 @@ function onEsc(e: KeyboardEvent) {
 function onCursor(line: number, col: number) {
   cursorLine.value = line;
   cursorCol.value = col;
+}
+
+function onSelection(text: string) {
+  selectionText.value = text;
 }
 
 function onOutlineGoto(line: number) {
@@ -227,15 +424,41 @@ watch(
 // Window title — keep "<filename> — SoloMD" so the OS taskbar /
 // dock / Cmd-Tab can distinguish multiple SoloMD windows. Falls back
 // to "SoloMD" when no document is active. Issue #53.
+//
+// Win11-ARM regression (v4.5 report, but pre-existing since v4.4.x — the
+// cold-start-with-file path is byte-identical): the document loaded but
+// the title stayed "SoloMD". On Windows the JS `setTitle()` issued during
+// the cold-start mount burst didn't land (the window isn't ready to accept
+// it yet, and the rejected promise was swallowed), whereas macOS WKWebView
+// applied it fine. Two-pronged, platform-agnostic fix:
+//   1. Set `document.title` too — on Windows, WebView2 mirrors the native
+//      window title from the page title, so this lands even when the
+//      direct `setTitle()` call is dropped. (Also fixes the stale
+//      "Tauri + Vue …" placeholder that index.html shipped with.)
+//   2. Await `setTitle()` so a rejection is actually caught + logged,
+//      instead of floating off as an unhandled promise.
+const applyWindowTitle = async (name?: string) => {
+  const title = name ? `${name} — SoloMD` : 'SoloMD';
+  document.title = title;
+  // macOS uses `titleBarStyle: "Overlay"` + `hiddenTitle: true` — the
+  // document name is shown in the in-app toolbar (SoloMD mark + filename).
+  // Calling setTitle() here would un-hide the native macOS title bar text,
+  // which overlaps and obscures the in-app toolbar's document name.
+  // Skip the native call on macOS; document.title above is enough for
+  // taskbar / mission-control / window-switcher labels.
+  if (isMacOS()) return;
+  try {
+    await getCurrentWindow().setTitle(title);
+  } catch (err) {
+    // Non-Tauri context (Vitest, SSR) — or a window not yet ready to
+    // accept it; document.title above is the cross-platform fallback.
+    console.debug('setTitle failed (document.title fallback applied)', err);
+  }
+};
 watch(
   () => tabs.activeTab?.fileName,
   (name) => {
-    const title = name ? `${name} — SoloMD` : 'SoloMD';
-    try {
-      void getCurrentWindow().setTitle(title);
-    } catch {
-      // Non-Tauri context (Vitest, SSR) — silently no-op.
-    }
+    void applyWindowTitle(name);
   },
   { immediate: true },
 );
@@ -264,6 +487,78 @@ watchEffect(() => {
   document.documentElement.style.setProperty('--ui-font-size', `${settings.uiFontSize}px`);
 });
 
+// v4.3.0 (issue #72): global zoom — scales everything for high-DPI screens.
+// #192: CSS `zoom` on the root is render-only in WebKit — layout metrics and
+// mouse coordinates stay unscaled, so after ⌘+/⌘- CodeMirror placed the caret
+// at the *unzoomed* position under the pointer (drift grows away from the
+// top-left corner). The native webview zoom (WKWebView pageZoom / WebView2 /
+// webkit2gtk zoom level) keeps one coordinate space end to end; CSS zoom
+// stays as the browser-mode fallback where getCurrentWebview() throws.
+watchEffect(() => {
+  const z = settings.globalZoom || 1;
+  try {
+    const webview = getCurrentWebview();
+    void webview
+      .setZoom(z)
+      .then(() => {
+        (document.documentElement.style as any).zoom = '';
+      })
+      .catch(() => {
+        (document.documentElement.style as any).zoom = String(z);
+      });
+  } catch {
+    (document.documentElement.style as any).zoom = String(z);
+  }
+});
+
+// #190 — dedicated code font. Overrides the --font-mono token app-wide
+// (code blocks in preview/live edit, inline code, fenced editors). Empty
+// keeps the built-in monospace stack from tokens.css.
+watchEffect(() => {
+  const f = (settings.codeFontFamily || '').trim();
+  if (f) {
+    const quoted = /\s/.test(f) && !/^["']/.test(f) && !f.includes(',') ? `"${f}"` : f;
+    document.documentElement.style.setProperty(
+      '--font-mono',
+      `${quoted}, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace`,
+    );
+  } else {
+    document.documentElement.style.removeProperty('--font-mono');
+  }
+});
+
+// v4.3.0 (PR #74 — yzcj105): preview-pane font size, surfaced as a CSS
+// custom property so Preview.vue can read it without re-rendering content.
+watchEffect(() => {
+  document.documentElement.style.setProperty(
+    '--content-font-size',
+    `${settings.previewFontSize || 15}px`,
+  );
+});
+
+// #141 — keep the markdown-it singleton's `breaks` option in lockstep with
+// the setting (runs once on hydration and again on every toggle).
+watchEffect(() => {
+  setMarkdownHardBreaks(settings.markdownHardBreaks);
+});
+
+// Keep the numbered-section auto-heading preprocessor in lockstep with its
+// opt-in setting (same singleton-flag pattern as breaks above).
+watchEffect(() => {
+  setMarkdownAutoNumberHeadings(settings.markdownAutoNumberHeadings);
+});
+
+// #133 — the rendered preview previously ignored the editor `fontFamily`
+// setting (it was hardcoded to the UI font), so in split view the two panes
+// used different typefaces. Surface the chosen face — with the same CJK
+// fallback stack the editor uses — so Preview.vue / ReadingView render in it.
+watchEffect(() => {
+  document.documentElement.style.setProperty(
+    '--content-font-family',
+    buildEditorFontStack(settings.fontFamily),
+  );
+});
+
 // Sync native menu bar language
 watchEffect(() => {
   invoke('set_menu_language', { lang: settings.language }).catch(() => {});
@@ -277,6 +572,13 @@ watchEffect(() => {
 // v2.0: keep the Rust workspace index in sync with the active folder.
 watchEffect(() => {
   workspaceIndex.setFolder(workspace.currentFolder).catch(() => {});
+});
+
+// v4.6.1 F1: bind the properties store to the workspace so display-mode
+// overrides + pinned list load/save from .solomd/properties.json (the store
+// shipped in 4.6 but setFolder was never called → persistence silently no-op'd).
+watchEffect(() => {
+  properties.setFolder(workspace.currentFolder).catch(() => {});
 });
 
 // v2.4: push the active folder into the capture endpoint's view of the
@@ -393,6 +695,7 @@ function onFilterTag(tag: string) {
 
 let unlistenOpened: UnlistenFn | null = null;
 let unlistenMenu: UnlistenFn | null = null;
+let unlistenWindowDestroyed: UnlistenFn | null = null;
 
 async function openExternalFile() {
   const filePath = tabs.activeTab?.filePath;
@@ -451,6 +754,34 @@ function dispatchMenuAction(id: string) {
     case 'view.cycleView':
       settings.cycleViewMode();
       break;
+    // v4.3.0 PR #74 — 3-axis zoom from the native View menu.
+    case 'view.zoomUiIn':
+      settings.zoomIn();
+      break;
+    case 'view.zoomUiOut':
+      settings.zoomOut();
+      break;
+    case 'view.zoomUiReset':
+      settings.resetZoom();
+      break;
+    case 'view.zoomEditorIn':
+      settings.editorFontIn();
+      break;
+    case 'view.zoomEditorOut':
+      settings.editorFontOut();
+      break;
+    case 'view.zoomEditorReset':
+      settings.resetEditorFontSize();
+      break;
+    case 'view.zoomPreviewIn':
+      settings.previewFontIn();
+      break;
+    case 'view.zoomPreviewOut':
+      settings.previewFontOut();
+      break;
+    case 'view.zoomPreviewReset':
+      settings.resetPreviewFontSize();
+      break;
     case 'view.cmdPalette':
       paletteOpen.value = true;
       break;
@@ -480,8 +811,107 @@ try {
   localStorage.removeItem('solomd.window.v1');
 } catch {}
 
+// #85 — auto-save dirty tabs when the app window loses focus. Gated on the
+// `autoSaveOnBlur` setting (default off) inside autoSaveDirtyTabs().
+function onWindowBlur() {
+  void files.autoSaveDirtyTabs();
+}
+
 onMounted(async () => {
+  // #153 (mobile) — Android's WebView reports env(safe-area-inset-top) as 0
+  // under forced edge-to-edge, so the toolbar rendered under the status bar
+  // and was untappable. Read the real bar heights natively and inject them as
+  // CSS vars (the .app padding uses max(env, var)). Physical px → CSS px via
+  // devicePixelRatio. Runs only on Android; failures leave the vars unset (0).
+  if (isAndroid()) {
+    try {
+      const insets = await invoke<{ top: number; bottom: number }>('android_system_insets');
+      const dpr = window.devicePixelRatio || 1;
+      const root = document.documentElement;
+      root.style.setProperty('--android-safe-top', `${Math.round((insets.top || 0) / dpr)}px`);
+      root.style.setProperty('--android-safe-bottom', `${Math.round((insets.bottom || 0) / dpr)}px`);
+    } catch (e) {
+      console.warn('android_system_insets failed', e);
+    }
+
+    // #148 — restore a previously-opened SAF vault. The tree URI + name are
+    // persisted in the workspace store; the OS-level grant is separately
+    // persisted (takePersistableUriPermission). If that grant is gone (revoked,
+    // or a fresh install), drop the stale vault so the user gets a clean "Open
+    // Folder" prompt instead of a tree that errors on every read.
+    if (workspace.safTreeUri) {
+      try {
+        const { safPersistedTrees } = await import('./lib/saf-fs');
+        const held = await safPersistedTrees();
+        if (!held.includes(workspace.safTreeUri)) {
+          workspace.setFolder(null);
+        }
+      } catch (e) {
+        console.warn('SAF vault restore check failed', e);
+      }
+    }
+
+    // #148 — resolve a SAF folder pick after the system picker returns. The
+    // picker is a separate activity that backgrounds our WebView, so the result
+    // (onActivityResult → native AtomicReference) can't be awaited inline; we
+    // drain it on resume. The 'solomd:saf-picking' flag (set in openFolder)
+    // scopes this to an in-flight pick.
+    const resolveSafPick = async () => {
+      if (localStorage.getItem('solomd:saf-picking') !== '1') return;
+      const { safResolvePicked } = await import('./lib/saf-fs');
+      for (let i = 0; i < 12; i++) {
+        let r: Awaited<ReturnType<typeof safResolvePicked>>;
+        try {
+          r = await safResolvePicked();
+        } catch {
+          return;
+        }
+        if (r === 'pending') {
+          await new Promise((res) => setTimeout(res, 300));
+          continue;
+        }
+        localStorage.removeItem('solomd:saf-picking');
+        if (r) {
+          workspace.setSafVault(r.treeUri, `saf:${r.rootDocId}`, r.name);
+          if (!settings.showFileTree) settings.toggleFileTree();
+        }
+        return; // resolved (folder or cancel)
+      }
+      // still pending after retries — leave the flag so the next resume retries
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void resolveSafPick();
+    });
+    void resolveSafPick();
+  }
+
+  // #87(3) — if a startup view mode is pinned, force it now (overrides the
+  // persisted last-used `viewMode`). Empty/null = resume whatever the user
+  // left in, as before.
+  // #128 — a pinned "reading" mode with nothing to show (restore-tabs off, or
+  // no tabs persisted → just a blank Untitled) lands on a blank reading window,
+  // so reading is deferred until there's a real document to read.
+  // #144(B) — but the #128 gate must not silently DROP the pin (that made the
+  // setting look dead whenever restore-tabs was off: last-used mode always
+  // won). Defer instead: apply reading the moment the first readable tab
+  // appears (file opened / first text typed), then stop watching.
+  if (settings.startupViewMode && settings.startupViewMode !== settings.viewMode) {
+    const hasReadable = () =>
+      tabs.tabs.some((t) => t.filePath || (t.content && t.content.trim().length > 0));
+    if (settings.startupViewMode !== 'reading' || hasReadable()) {
+      settings.setViewMode(settings.startupViewMode);
+    } else {
+      const stop = watch(hasReadable, (ok) => {
+        if (!ok) return;
+        settings.setViewMode('reading');
+        stop();
+      });
+    }
+  }
+
   window.addEventListener('keydown', onEsc);
+  window.addEventListener('wheel', onWheelZoom, { passive: false, capture: true });
+  window.addEventListener('blur', onWindowBlur);
   window.addEventListener('solomd:open-help', onOpenHelpEvent as EventListener);
   window.addEventListener('solomd:open-global-search', onOpenSearchEvent as EventListener);
   window.addEventListener('solomd:open-cjk-proofread', onOpenCjkProofreadEvent as EventListener);
@@ -502,6 +932,17 @@ onMounted(async () => {
     console.warn('opened-file listener not available', err);
   }
 
+  // #148 / #151 — Android real-folder vault picking wiring.
+  window.addEventListener('solomd:android-folder-picker', () => {
+    androidPickerOpen.value = true;
+  });
+  window.addEventListener('solomd:android-request-storage', () => {
+    void requestAndroidStorage();
+  });
+  window.addEventListener('solomd:android-restart-needed', () => {
+    androidRestartNeeded.value = true;
+  });
+
   // iOS / Android — tauri-plugin-deep-link delivers incoming files
   // (Files app "Open with…", Mail attachments, AirDrop) as a list of URL
   // strings. file:// URLs point into our app's Documents dir (the OS
@@ -513,10 +954,8 @@ onMounted(async () => {
       if (!urls) return;
       for (const raw of urls) {
         try {
-          const path = raw.startsWith('file://')
-            ? decodeURIComponent(raw.slice('file://'.length))
-            : raw;
-          await files.openPath(path, { bypassNewWindow: true });
+          // openPath normalizes file:// → path itself (#139); pass raw through.
+          await files.openPath(raw, { bypassNewWindow: true });
         } catch (err) {
           console.warn('deep-link openPath failed', raw, err);
         }
@@ -545,13 +984,39 @@ onMounted(async () => {
 
   // New-window launched via `?path=<encoded>` (used by the "open in new
   // window" setting). Same reasoning as above — bypass the setting.
+  let initialPath: string | null = null;
   try {
     const params = new URLSearchParams(window.location.search);
-    const initialPath = params.get('path');
+    initialPath = params.get('path');
     if (initialPath) {
       await files.openPath(initialPath, { bypassNewWindow: true });
     }
   } catch {}
+
+  // #103 follow-up — auxiliary windows ("Open file in new window") close
+  // independently of the main window (handled in runner.rs, the original #103
+  // fix). We intentionally do NOT auto-resurrect them on launch.
+  //
+  // An earlier version re-spawned every *registered* aux window on every
+  // start. Entries left behind by a force-quit (onCloseRequested never fires)
+  // or by a since-deleted/temp file were never pruned, so a "ghost" window
+  // reappeared on every launch — even for paths that no longer exist (user
+  // report: "每次打开都冒出一个额外窗口"). Closed windows now stay closed.
+  //
+  // On the main window we also clear any stale registry entries so users
+  // already affected by the old behavior stop seeing the ghost window after
+  // updating. (spawnAuxWindow still works for the current session; the
+  // registry simply isn't replayed across restarts anymore.)
+  try {
+    if (!isAuxLabel(getCurrentWindow().label)) {
+      windowsStore.reload();
+      for (const label of [...windowsStore.auxLabels]) {
+        windowsStore.unregister(label);
+      }
+    }
+  } catch (err) {
+    console.warn('aux-window registry cleanup failed', err);
+  }
 
   // First-launch welcome tour: only when there are no tabs at all (fresh
   // install or user has cleared session) and we haven't shown it before.
@@ -577,6 +1042,7 @@ onMounted(async () => {
   // as a named handler (see `onOpenAgentWizard` below) so onBeforeUnmount
   // can detach it — otherwise every HMR remount stacks another listener.
   window.addEventListener('solomd:open-agent-wizard', onOpenAgentWizard);
+  window.addEventListener('solomd:open-image-url-dialog', onOpenImageUrlDialog);
 
   // Initialize tile layout: validate persisted state or create default
   tiles.validate(tabs.tabs);
@@ -596,6 +1062,19 @@ onMounted(async () => {
     console.warn('close-requested listener failed', err);
   }
 
+  // #103 — backstop registry cleanup. The destroyed window normally
+  // unregisters itself via onCloseRequested, but a webview teardown that
+  // skips CloseRequested would leave a stale entry that resurrects on the
+  // next launch. Rust emits `solomd://window-destroyed` with the label so
+  // any surviving window drops it from the registry.
+  try {
+    unlistenWindowDestroyed = await listen<string>('solomd://window-destroyed', (e) => {
+      if (e.payload && isAuxLabel(e.payload)) windowsStore.unregister(e.payload);
+    });
+  } catch (err) {
+    console.warn('window-destroyed listener not available', err);
+  }
+
   // Native menu bar
   try {
     unlistenMenu = await listen<string>('solomd://menu', (e) => {
@@ -608,9 +1087,24 @@ onMounted(async () => {
   // Drag-drop file open
   try {
     const webview = getCurrentWebview();
+    const IMAGE_DROP_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tiff']);
     await webview.onDragDropEvent(async (event) => {
       if (event.payload.type === 'drop') {
         for (const path of event.payload.paths) {
+          const ext = (path.split('.').pop() || '').toLowerCase();
+          if (IMAGE_DROP_EXTS.has(ext)) {
+            // An image file dropped onto the editor should be inserted, not
+            // run through the markitdown document converter (png/jpg/etc are
+            // in useFiles' CONVERT_CLI set). Route it to the focused editor's
+            // insertImageFromPath, which copies it into the note's assets dir
+            // and inserts a Markdown image link.
+            window.dispatchEvent(
+              new CustomEvent('solomd:insert-image-path', {
+                detail: { path, paneId: tiles.focusedPaneId },
+              }),
+            );
+            continue;
+          }
           // Drop targets this window explicitly — bypass new-window routing.
           await files.openPath(path, { bypassNewWindow: true });
         }
@@ -629,8 +1123,14 @@ onMounted(async () => {
         const toastsStore = (await import('./stores/toasts')).useToastsStore();
         const { useI18n } = await import('./i18n');
         const { t: tr } = useI18n();
-        toastsStore.success(tr('settings.updateAvailable', { version: result.latest || '' }), 8000);
-        setTimeout(() => openReleaseUrl(result.url), 3000);
+        // #171 — no auto-opening the browser (it yanks the user out of
+        // whatever they're writing). The toast lingers; clicking it opens
+        // the download page.
+        toastsStore.success(
+          tr('settings.updateAvailable', { version: result.latest || '' }),
+          12000,
+          () => { void openReleaseUrl(result.url); },
+        );
       }
     } catch { /* silent */ }
   }
@@ -651,13 +1151,52 @@ function onAIRewriteAccept(e: Event) {
 function onAIRewriteCancel() {
   // No-op for now; AIRewriteOverlay self-closes.
 }
-function onOpenBases() { basesOpen.value = true; }
+function onOpenBases() { basesOpen.value = true; viewOpen.value = false; typeLensOpen.value = false; }
 function onCloseBases() { basesOpen.value = false; }
+function onOpenInbox() { inboxViewOpen.value = true; typeLensOpen.value = false; }
+function onCloseInbox() { inboxViewOpen.value = false; }
+// v4.6.1 F2 — type lens content swap. Mutually exclusive with the other
+// center-pane overlays (mirrors basesOpen / inboxViewOpen). The open event
+// carries which type to focus; we pass it down as a prop so the view is
+// ready on mount (the event fired before the component existed).
+function onOpenTypeLens(e: Event) {
+  const name = (e as CustomEvent).detail?.typeName;
+  if (typeof name !== 'string' || !name) return;
+  typeLensName.value = name;
+  typeLensOpen.value = true;
+  basesOpen.value = false;
+  inboxViewOpen.value = false;
+  viewOpen.value = false;
+}
+function onCloseTypeLens() { typeLensOpen.value = false; }
+// v4.6 F5 — saved-view content swap.
+function onOpenView() { viewOpen.value = true; basesOpen.value = false; typeLensOpen.value = false; }
+function onCloseView() { viewOpen.value = false; }
 
 async function onWikiOpen(e: Event) {
   const detail = (e as CustomEvent).detail || {};
   const target: string = detail.target || '';
   if (!target) return;
+  // #116 — a path-like target (`./sub/foo.md`, `../notes/bar.md`, `dir/x.md`)
+  // is a RELATIVE reference, not a bare wiki stem. Resolve it against the
+  // active file's directory and open directly — the same logic Preview.vue
+  // uses for rendered links. workspaceIndex.resolve() only matches bare
+  // stems/titles, so it silently failed for these (the reported bug).
+  if (/[\\/]/.test(target) || target.startsWith('.')) {
+    const cur = tabs.activeTab?.filePath;
+    if (cur) {
+      const sep = Math.max(cur.lastIndexOf('/'), cur.lastIndexOf('\\'));
+      const dir = sep >= 0 ? cur.slice(0, sep + 1) : '';
+      const cleaned = target.replace(/^\.\//, '');
+      try {
+        await files.openPath(dir + cleaned, { bypassNewWindow: true });
+        return;
+      } catch (err) {
+        console.warn('[wiki-open] relative openPath failed:', dir + cleaned, err);
+        // fall through to stem resolution as a best effort
+      }
+    }
+  }
   const path = await workspaceIndex.resolve(target);
   if (path) {
     await files.openPath(path, { bypassNewWindow: true });
@@ -684,10 +1223,18 @@ window.addEventListener('solomd:ai-rewrite-accept', onAIRewriteAccept as EventLi
 window.addEventListener('solomd:ai-rewrite-cancel', onAIRewriteCancel as EventListener);
 window.addEventListener(BASES_OPEN_EVENT, onOpenBases as EventListener);
 window.addEventListener(BASES_CLOSE_EVENT, onCloseBases as EventListener);
+window.addEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
+window.addEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+window.addEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
+window.addEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
+window.addEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
+window.addEventListener(VIEW_CLOSE_EVENT, onCloseView as EventListener);
 window.addEventListener('solomd:open-settings', onOpenSettingsEvent as EventListener);
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onEsc);
+  window.removeEventListener('wheel', onWheelZoom, { capture: true } as EventListenerOptions);
+  window.removeEventListener('blur', onWindowBlur);
   window.removeEventListener('solomd:open-help', onOpenHelpEvent as EventListener);
   window.removeEventListener('solomd:open-global-search', onOpenSearchEvent as EventListener);
   window.removeEventListener('solomd:open-cjk-proofread', onOpenCjkProofreadEvent as EventListener);
@@ -696,8 +1243,15 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:ai-rewrite-cancel', onAIRewriteCancel as EventListener);
   window.removeEventListener(BASES_OPEN_EVENT, onOpenBases as EventListener);
   window.removeEventListener(BASES_CLOSE_EVENT, onCloseBases as EventListener);
+  window.removeEventListener(INBOX_OPEN_EVENT, onOpenInbox as EventListener);
+  window.removeEventListener(INBOX_CLOSE_EVENT, onCloseInbox as EventListener);
+  window.removeEventListener(TYPE_LENS_OPEN_EVENT, onOpenTypeLens as EventListener);
+  window.removeEventListener(TYPE_LENS_CLOSE_EVENT, onCloseTypeLens as EventListener);
+  window.removeEventListener(VIEW_OPEN_EVENT, onOpenView as EventListener);
+  window.removeEventListener(VIEW_CLOSE_EVENT, onCloseView as EventListener);
   window.removeEventListener('solomd:open-settings', onOpenSettingsEvent as EventListener);
   window.removeEventListener('solomd:open-agent-wizard', onOpenAgentWizard);
+  window.removeEventListener('solomd:open-image-url-dialog', onOpenImageUrlDialog);
   if (unlistenOpened) {
     unlistenOpened();
     unlistenOpened = null;
@@ -705,6 +1259,10 @@ onBeforeUnmount(() => {
   if (unlistenMenu) {
     unlistenMenu();
     unlistenMenu = null;
+  }
+  if (unlistenWindowDestroyed) {
+    unlistenWindowDestroyed();
+    unlistenWindowDestroyed = null;
   }
 });
 
@@ -717,8 +1275,26 @@ const showBacklinksPane = computed(
     tabs.activeTab?.language === 'markdown' &&
     !!workspace.currentFolder,
 );
+const showRelationshipsPane = computed(
+  () =>
+    settings.showRelationships &&
+    tabs.activeTab?.language === 'markdown' &&
+    !!workspace.currentFolder,
+);
 const showTagsPane = computed(
   () => settings.showTagsPanel && !!workspace.currentFolder,
+);
+// v4.6 F4 — Neighborhood relationship explorer. Markdown-only, needs a folder
+// (frontmatter wikilink groups are resolved against the workspace index).
+const showNeighborhoodPane = computed(
+  () =>
+    settings.showNeighborhood &&
+    tabs.activeTab?.language === 'markdown' &&
+    !!workspace.currentFolder,
+);
+// v4.6 F2 — Types pane (types-as-lenses). Workspace-scoped like Tags.
+const showTypesPane = computed(
+  () => settings.showTypesPanel && !!workspace.currentFolder,
 );
 const showHistoryPane = computed(
   // v4.0.2 — decoupled from autoGitEnabled (#55). Hiding the pane via
@@ -727,6 +1303,15 @@ const showHistoryPane = computed(
   () =>
     settings.autoGitEnabled &&
     settings.showHistoryPanel &&
+    tabs.activeTab?.language === 'markdown' &&
+    !!workspace.currentFolder,
+);
+// v4.6 F1: Properties inspector — frontmatter editor for the active markdown
+// note. Toggled via ⌘⇧I / command palette `view.toggleInspector`. Requires an
+// open folder (reads parsed frontmatter from the workspace index).
+const showInspectorPane = computed(
+  () =>
+    settings.showInspector &&
     tabs.activeTab?.language === 'markdown' &&
     !!workspace.currentFolder,
 );
@@ -747,8 +1332,12 @@ const showRightSidebar = computed(() => {
     showSearchPane.value ||
     showOutlinePane.value ||
     showBacklinksPane.value ||
+    showRelationshipsPane.value ||
     showTagsPane.value ||
+    showNeighborhoodPane.value ||
+    showTypesPane.value ||
     showHistoryPane.value ||
+    showInspectorPane.value ||
     showAgentPane.value
   );
 });
@@ -758,15 +1347,78 @@ const showRightSidebar = computed(() => {
 // Search slots in at the top because users typically want results visible
 // while scanning the rest of the sidebar context.
 const visibleRsPanes = computed(() => {
-  const panes: { id: 'search' | 'outline' | 'backlinks' | 'tags' | 'history' | 'agent' }[] = [];
-  if (showSearchPane.value) panes.push({ id: 'search' });
-  if (showOutlinePane.value) panes.push({ id: 'outline' });
-  if (showBacklinksPane.value) panes.push({ id: 'backlinks' });
-  if (showTagsPane.value) panes.push({ id: 'tags' });
-  if (showHistoryPane.value) panes.push({ id: 'history' });
-  if (showAgentPane.value) panes.push({ id: 'agent' });
-  return panes;
+  // v4.3.0 issue #57b — order driven by settings.rsPaneOrder so users can
+  // drag-reorder. Unknown ids (newly-shipped future panes) get appended at
+  // the end so a SoloMD update doesn't blow away an existing user layout.
+  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
+    search: showSearchPane.value,
+    outline: showOutlinePane.value,
+    backlinks: showBacklinksPane.value,
+    relationships: showRelationshipsPane.value,
+    tags: showTagsPane.value,
+    neighborhood: showNeighborhoodPane.value,
+    types: showTypesPane.value,
+    history: showHistoryPane.value,
+    inspector: showInspectorPane.value,
+    agent: showAgentPane.value,
+  };
+  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
+  const ordered: string[] = [];
+  for (const id of settings.rsPaneOrder || []) {
+    if (id in all && !ordered.includes(id)) ordered.push(id);
+  }
+  for (const id of known) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered
+    .filter((id) => all[id as keyof typeof all])
+    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
 });
+
+// #131 — sidebar pane reordering via the ⋮⋮ grip.
+//
+// This used HTML5 drag-and-drop (`draggable` + dragstart/dragover/drop), but
+// the Tauri webview ships with `dragDropEnabled: true` (the app needs the
+// native OS file-drop for "drop a file to open it" + image drop), and that
+// native handler swallows in-webview HTML5 DnD — so the grip silently did
+// nothing. Pointer events are not intercepted, so we drive the reorder
+// manually: pointerdown on the grip → track the pane under the cursor →
+// pointerup commits the move. Works on mouse, trackpad and touch alike.
+const draggingPaneId = ref<string | null>(null);
+const dragOverPaneId = ref<string | null>(null);
+function startPaneReorder(e: PointerEvent, id: string) {
+  if (e.button !== 0 && e.pointerType === 'mouse') return;
+  e.preventDefault();
+  draggingPaneId.value = id;
+  dragOverPaneId.value = null;
+  const paneUnder = (x: number, y: number): string | null => {
+    const host = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest(
+      '[data-rs-pane]',
+    ) as HTMLElement | null;
+    return host?.getAttribute('data-rs-pane') || null;
+  };
+  const onMove = (m: PointerEvent) => {
+    const over = paneUnder(m.clientX, m.clientY);
+    dragOverPaneId.value = over && over !== id ? over : null;
+  };
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    const src = draggingPaneId.value;
+    const tgt = dragOverPaneId.value;
+    draggingPaneId.value = null;
+    dragOverPaneId.value = null;
+    if (!src || !tgt || src === tgt) return;
+    // Index into the full order list (not just the visible subset) so the
+    // reorder survives toggling pane visibility off + on.
+    const order = [...(settings.rsPaneOrder || [])];
+    const targetIdx = order.indexOf(tgt);
+    if (targetIdx < 0) return;
+    settings.moveRsPane(src, targetIdx);
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
 
 // Sidebar visibility / pane composition changes the editor's available
 // width. CodeMirror's ResizeObserver may lag for a frame, so dispatch
@@ -827,6 +1479,13 @@ function onSidebarResize(side: 'left' | 'right', ev: MouseEvent) {
   document.addEventListener('mouseup', onUp);
 }
 const basesOpen = ref(false);
+const inboxViewOpen = ref(false);
+// v4.6.1 F2 — type lens (full-pane filtered list of one type's members).
+const typeLensOpen = ref(false);
+const typeLensName = ref('');
+// v4.6 F5 — when a saved view is opened from the sidebar, the content area
+// swaps to ViewNoteList (mirrors the basesOpen pattern).
+const viewOpen = ref(false);
 const aiHasKey = ref(false);
 async function refreshAiHasKey() {
   if (!settings.aiEnabled) { aiHasKey.value = false; return; }
@@ -840,7 +1499,12 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
 </script>
 
 <template>
-  <div class="app" :class="{ 'app--reading': settings.viewMode === 'reading' }">
+  <UiPreview v-if="showUiKit" />
+  <div
+    v-else
+    class="app"
+    :class="{ 'app--reading': settings.viewMode === 'reading', 'app--mobile': isMobile() }"
+  >
     <!--
       v2.4 reading mode swaps out the entire toolbar / sidebar / status-bar
       stack for a single ReadingView component. We keep all the modal
@@ -859,79 +1523,176 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
       />
       <TelemetryBanner />
       <div class="workspace">
-        <FileTree v-if="settings.showFileTree" />
+        <div v-if="settings.showFileTree || settings.showViewsPanel" class="left-stack">
+          <FileTree v-if="settings.showFileTree" />
+          <ViewsPanel v-if="settings.showViewsPanel" />
+        </div>
         <aside
           v-if="showRightSidebar && settings.outlineSide === 'left'"
           class="side-sidebar side-sidebar--left"
           :style="sideSidebarStyle"
+          @contextmenu.prevent="openSidebarCtx"
         >
           <div class="side-sidebar__resize side-sidebar__resize--right" @mousedown="onSidebarResize('left', $event)" />
           <template v-for="(p, idx) in visibleRsPanes" :key="p.id">
             <RsSplitter v-if="idx > 0" :above="visibleRsPanes[idx-1].id" :below="p.id" />
-            <div :data-rs-pane="p.id" :class="['rs-pane-host', `rs-pane-host--${p.id}`]" :style="paneStyle(p.id)">
+            <div
+              :data-rs-pane="p.id"
+              :class="[
+                'rs-pane-host',
+                `rs-pane-host--${p.id}`,
+                draggingPaneId === p.id ? 'rs-pane-host--dragging' : '',
+                dragOverPaneId === p.id ? 'rs-pane-host--drop-target' : '',
+              ]"
+              :style="paneStyle(p.id)"
+            >
+              <div
+                class="rs-pane-grip"
+                :title="t('rsPane.dragToReorder')"
+                @pointerdown="startPaneReorder($event, p.id)"
+              >⋮⋮</div>
               <GlobalSearch
                 v-if="p.id === 'search'"
                 :prefill="searchPrefill"
                 @close="searchOpen = false"
               />
               <Outline v-if="p.id === 'outline'" :cursor-line="cursorLine" @goto="onOutlineGoto" />
-              <BacklinksPanel v-if="p.id === 'backlinks'" @close="settings.toggleBacklinks()" />
+              <BacklinksPanel v-if="p.id === 'backlinks'" @close="ctxToggle(() => settings.toggleBacklinks())" />
+              <RelationshipsPanel v-if="p.id === 'relationships'" @close="ctxToggle(() => settings.toggleRelationships())" />
               <TagsPanel
                 v-if="p.id === 'tags'"
-                @close="settings.toggleTagsPanel()"
+                @close="ctxToggle(() => settings.toggleTagsPanel())"
                 @filter-tag="onFilterTag"
               />
-              <HistoryPanel v-if="p.id === 'history'" @close="settings.toggleHistoryPanel()" />
+              <NeighborhoodPanel
+                v-if="p.id === 'neighborhood'"
+                @close="ctxToggle(() => settings.toggleNeighborhood())"
+              />
+              <TypesPanel
+                v-if="p.id === 'types'"
+                @close="ctxToggle(() => settings.toggleTypesPanel())"
+              />
+              <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
+              <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
               <AgentPanel
                 v-if="p.id === 'agent'"
                 @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="settings.toggleAgentPanel()"
+                @close="ctxToggle(() => settings.toggleAgentPanel())"
               />
             </div>
           </template>
         </aside>
         <div class="content">
           <BasesView v-if="basesOpen" />
-          <TileRoot v-else :node="tiles.root" @cursor="onCursor" />
+          <InboxView v-else-if="inboxViewOpen" />
+          <TypeLensView v-else-if="typeLensOpen" :type-name="typeLensName" />
+          <ViewNoteList v-else-if="viewOpen" />
+          <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
         </div>
         <aside
           v-if="showRightSidebar && settings.outlineSide !== 'left'"
           class="side-sidebar side-sidebar--right"
           :style="sideSidebarStyle"
+          @contextmenu.prevent="openSidebarCtx"
         >
           <div class="side-sidebar__resize side-sidebar__resize--left" @mousedown="onSidebarResize('right', $event)" />
-          <button
-            class="side-sidebar__close"
-            @click="settings.toggleRightSidebar"
-            title="Close right sidebar (⌥⌘B)"
-            aria-label="Close right sidebar"
-          >×</button>
           <template v-for="(p, idx) in visibleRsPanes" :key="p.id">
             <RsSplitter v-if="idx > 0" :above="visibleRsPanes[idx-1].id" :below="p.id" />
-            <div :data-rs-pane="p.id" :class="['rs-pane-host', `rs-pane-host--${p.id}`]" :style="paneStyle(p.id)">
+            <div
+              :data-rs-pane="p.id"
+              :class="[
+                'rs-pane-host',
+                `rs-pane-host--${p.id}`,
+                draggingPaneId === p.id ? 'rs-pane-host--dragging' : '',
+                dragOverPaneId === p.id ? 'rs-pane-host--drop-target' : '',
+              ]"
+              :style="paneStyle(p.id)"
+            >
+              <div
+                class="rs-pane-grip"
+                :title="t('rsPane.dragToReorder')"
+                @pointerdown="startPaneReorder($event, p.id)"
+              >⋮⋮</div>
               <GlobalSearch
                 v-if="p.id === 'search'"
                 :prefill="searchPrefill"
                 @close="searchOpen = false"
               />
               <Outline v-if="p.id === 'outline'" :cursor-line="cursorLine" @goto="onOutlineGoto" />
-              <BacklinksPanel v-if="p.id === 'backlinks'" @close="settings.toggleBacklinks()" />
+              <BacklinksPanel v-if="p.id === 'backlinks'" @close="ctxToggle(() => settings.toggleBacklinks())" />
+              <RelationshipsPanel v-if="p.id === 'relationships'" @close="ctxToggle(() => settings.toggleRelationships())" />
               <TagsPanel
                 v-if="p.id === 'tags'"
-                @close="settings.toggleTagsPanel()"
+                @close="ctxToggle(() => settings.toggleTagsPanel())"
                 @filter-tag="onFilterTag"
               />
-              <HistoryPanel v-if="p.id === 'history'" @close="settings.toggleHistoryPanel()" />
+              <NeighborhoodPanel
+                v-if="p.id === 'neighborhood'"
+                @close="ctxToggle(() => settings.toggleNeighborhood())"
+              />
+              <TypesPanel
+                v-if="p.id === 'types'"
+                @close="ctxToggle(() => settings.toggleTypesPanel())"
+              />
+              <HistoryPanel v-if="p.id === 'history'" @close="ctxToggle(() => settings.toggleHistoryPanel())" />
+              <PropertiesInspector v-if="p.id === 'inspector'" @close="ctxToggle(() => settings.toggleInspector())" />
               <AgentPanel
                 v-if="p.id === 'agent'"
                 @open-settings="(section?: string) => openSettingsAt(section ?? 'integrations')"
-                @close="settings.toggleAgentPanel()"
+                @close="ctxToggle(() => settings.toggleAgentPanel())"
               />
             </div>
           </template>
         </aside>
       </div>
-      <StatusBar :line="cursorLine" :col="cursorCol" />
+      <StatusBar :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
+      <!-- v4.3.0 PR #75 — right-click context menu for sidebar pane toggles. -->
+      <Teleport to="body">
+        <div
+          v-if="sidebarCtx"
+          class="sidebar-ctx"
+          :style="{ left: sidebarCtx.x + 'px', top: sidebarCtx.y + 'px' }"
+          @click.stop
+        >
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { searchOpen = !searchOpen })">
+            <span class="sidebar-ctx__check">{{ searchOpen ? '✓' : '' }}</span>
+            {{ t('rsPane.search') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { if (tabs.activeTab) tabs.toggleOutline(tabs.activeTab.id) })">
+            <span class="sidebar-ctx__check">{{ showOutlinePane ? '✓' : '' }}</span>
+            {{ t('rsPane.outline') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleBacklinks() })">
+            <span class="sidebar-ctx__check">{{ settings.showBacklinks ? '✓' : '' }}</span>
+            {{ t('rsPane.backlinks') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleRelationships() })">
+            <span class="sidebar-ctx__check">{{ settings.showRelationships ? '✓' : '' }}</span>
+            {{ t('rsPane.relationships') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleTagsPanel() })">
+            <span class="sidebar-ctx__check">{{ settings.showTagsPanel ? '✓' : '' }}</span>
+            {{ t('rsPane.tags') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleNeighborhood() })">
+            <span class="sidebar-ctx__check">{{ settings.showNeighborhood ? '✓' : '' }}</span>
+            {{ t('rsPane.neighborhood') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleTypesPanel() })">
+            <span class="sidebar-ctx__check">{{ settings.showTypesPanel ? '✓' : '' }}</span>
+            {{ t('rsPane.types') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleHistoryPanel() })">
+            <span class="sidebar-ctx__check">{{ settings.showHistoryPanel ? '✓' : '' }}</span>
+            {{ t('rsPane.history') }}
+          </label>
+          <label v-if="!IS_APP_STORE_BUILD" class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleAgentPanel() })">
+            <span class="sidebar-ctx__check">{{ settings.showAgentPanel ? '✓' : '' }}</span>
+            {{ t('rsPane.agent') }}
+          </label>
+        </div>
+        <div v-if="sidebarCtx" class="sidebar-ctx__backdrop" @click="closeSidebarCtx" />
+      </Teleport>
     </template>
 
     <AIRewriteOverlay
@@ -968,7 +1729,15 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
       @discard="onUnsavedAction('discard')"
       @cancel="onUnsavedAction('cancel')"
     />
+    <ImageUrlDialog
+      :open="imageUrlDialogOpen"
+      @confirm="onImageUrlConfirm"
+      @cancel="imageUrlDialogOpen = false"
+    />
     <SessionRestoreDialog />
+    <!-- v4.6 F5 — saved-view create/edit modal (self-mounts via window events). -->
+    <ViewEditorDialog />
+    <WhiteboardOverlay />
     <FileChangedDialog
       :open="fileChangedOpen"
       :file-name="fileChangedFileName"
@@ -977,23 +1746,121 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
       @cancel="onFileChangedAction('cancel')"
     />
     <Toast />
+    <AndroidFolderPicker
+      :open="androidPickerOpen"
+      :start="workspace.currentFolder ?? undefined"
+      @pick="onAndroidFolderPick"
+      @close="androidPickerOpen = false"
+      @request-permission="androidPickerOpen = false; requestAndroidStorage()"
+    />
+    <!-- #148 (follow-up) — all-files access granted but not yet effective on
+         this process; a restart re-mounts shared storage. -->
+    <div v-if="androidRestartNeeded" class="arn-backdrop">
+      <div class="arn">
+        <div class="arn__title">重启一次即可读取文件夹</div>
+        <p class="arn__body">
+          文件访问权限已开启 ✅。安卓要求 App 重启后才能真正读取手机存储。<br /><br />
+          点「关闭 SoloMD」→ 从后台任务里划掉 → 重新打开 App,再点「打开文件夹」就能选你的笔记文件夹了。
+        </p>
+        <div class="arn__foot">
+          <button class="arn__btn" @click="androidRestartNeeded = false">稍后</button>
+          <button class="arn__btn arn__btn--primary" @click="doAndroidRestart">关闭 SoloMD</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* #148 (follow-up) — post-grant restart prompt. */
+.arn-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--z-modal, 2000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.arn {
+  background: var(--bg, #fff);
+  color: var(--text, #111);
+  border-radius: var(--r-lg, 12px);
+  width: 100%;
+  max-width: 380px;
+  box-shadow: var(--sh-pop, 0 8px 28px rgba(0, 0, 0, 0.12));
+  padding: 18px 18px 14px;
+}
+.arn__title { font-weight: 600; font-size: 16px; margin-bottom: 10px; }
+.arn__body { font-size: 14px; line-height: 1.6; color: var(--text-muted, #555); margin: 0 0 16px; }
+.arn__foot { display: flex; gap: 10px; justify-content: flex-end; }
+.arn__btn {
+  border: var(--bd, 1px solid var(--border, #ddd));
+  background: var(--bg-hover, #f5f5f5);
+  border-radius: var(--r-sm, 6px);
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+}
+.arn__btn--primary { background: var(--accent, #ff9f40); color: #000; border-color: transparent; font-weight: 600; }
+
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
+  /* #125 — 100% (not 100vw/100vh) so the app-wide CSS `zoom` doesn't render
+     the root wider/taller than the window (vw/vh ignore zoom). See the matching
+     note in main.css on `html, body, #app`. */
+  height: 100%;
+  width: 100%;
   background: var(--bg);
   color: var(--text);
+  /* v4.3.x issue #73 — respect mobile system-bar insets so the toolbar
+     doesn't render under the Android status bar (carrier signal / battery
+     / clock) and the bottom status bar doesn't overlap the gesture-nav
+     bar. `env(safe-area-inset-*)` returns 0 on desktops where the
+     property isn't defined, so this is a no-op there.
+     #153 (mobile) — Android 15 forces edge-to-edge (targetSdk 36, can't opt
+     out), but Android's WebView reports `env(safe-area-inset-top)` as 0, so
+     the toolbar rendered UNDER the status bar and was untappable. We read the
+     real bar heights natively (android_system_insets) and inject
+     `--android-safe-top/bottom`; `max()` uses whichever is larger so iOS (env)
+     and Android (native var) both work, and desktop stays 0. */
+  padding-top: max(env(safe-area-inset-top, 0px), var(--android-safe-top, 0px));
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-safe-bottom, 0px));
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+  box-sizing: border-box;
 }
 .workspace {
   flex: 1;
   display: flex;
   min-height: 0;
   overflow: hidden;
+}
+/* v4.6 F5 — left column stacks the file tree above the Saved Views panel. */
+.left-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.left-stack > :deep(.ftree) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+/* #148 (mobile) — on a phone the file tree takes the full width (the editor is
+   collapsed underneath while picking); opening a file hides the tree and the
+   editor gets the whole screen. Avoids the tree + editor squeezing each other
+   into unreadable slivers on a narrow viewport. */
+.app--mobile .left-stack {
+  flex: 1 1 100%;
+  width: 100%;
+}
+.app--mobile .left-stack > :deep(.ftree) {
+  width: 100%;
 }
 .side-sidebar {
   position: relative;
@@ -1033,28 +1900,51 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
   background: var(--accent, #6366f1);
   opacity: 0.5;
 }
-.side-sidebar__close {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
+/* v4.3.0 PR #75 — right-click context menu floats over the workspace via
+   <Teleport to="body">. Toolbar's master-toggle is the canonical hide
+   action; the per-sidebar × close button is gone, since the menu doubles
+   as a hide path (uncheck every pane = sidebar auto-hides). */
+.sidebar-ctx {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  user-select: none;
+}
+.sidebar-ctx__item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: transparent;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  background: none;
   border: none;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  z-index: 11;
-  padding: 0;
-}
-.side-sidebar__close:hover {
-  background: var(--hover-bg);
   color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  box-sizing: border-box;
+}
+.sidebar-ctx__item:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.sidebar-ctx__check {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.sidebar-ctx__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
 }
 /* v4.0.2 — each pane lives inside an .rs-pane-host wrapper so the
    <RsSplitter> can find adjacent panes via [data-rs-pane] and resize
@@ -1090,6 +1980,51 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
 .rs-pane-host :deep(.backlinks) {
   border-left: 0;
   border-right: 0;
+}
+.rs-pane-host :deep(.rel) {
+  border-left: 0;
+  border-right: 0;
+}
+/* v4.3.0 issue #57b — drag grip + drop-target highlight for right-sidebar
+   reordering. Grip is intentionally subtle (8px dotted strip at the top of
+   each pane); hovering surfaces it more clearly. Only the grip is draggable
+   so text selection inside the pane still works. */
+.rs-pane-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 10px;
+  flex: 0 0 10px;
+  color: var(--text-faint);
+  font-size: 8px;
+  letter-spacing: 2px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* #131 — pointer-driven reorder: stop the browser turning a vertical drag on
+     the grip into a scroll/pan gesture so pointermove tracking stays clean. */
+  touch-action: none;
+  background: transparent;
+  transition: background 120ms, color 120ms;
+}
+.rs-pane-grip:hover {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+.rs-pane-grip:active {
+  cursor: grabbing;
+}
+.rs-pane-host--dragging {
+  opacity: 0.4;
+}
+.rs-pane-host--drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+/* Make sure the grip + content layout share vertical space cleanly. */
+.rs-pane-host > .rs-pane-grip + :deep(*) {
+  flex: 1 1 0;
+  min-height: 0;
 }
 .content {
   flex: 1;

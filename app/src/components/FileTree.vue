@@ -6,8 +6,15 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useFiles } from '../composables/useFiles';
 import { useInbox } from '../composables/useInbox';
+import { useInboxView } from '../composables/useInboxView';
+import { useSettingsStore } from '../stores/settings';
 import { useToastsStore } from '../stores/toasts';
+import { useGithubSyncStore } from '../stores/githubSync';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { useTabsStore } from '../stores/tabs';
 import { useI18n } from '../i18n';
+import { isMobile } from '../lib/platform';
+import { isSafPath, fromSafPath, safList, safCreate } from '../lib/saf-fs';
 
 interface Entry {
   name: string;
@@ -26,7 +33,82 @@ interface Node extends Entry {
 const workspace = useWorkspaceStore();
 const files = useFiles();
 const inbox = useInbox();
+const inboxView = useInboxView();
+const settings = useSettingsStore();
 const toasts = useToastsStore();
+const ghSync = useGithubSyncStore();
+
+// v4.6.x — sidebar width resize state
+const isResizing = ref(false);
+const startX = ref(0);
+const startWidth = ref(0);
+
+function onResizeStart(e: MouseEvent) {
+  e.preventDefault();
+  isResizing.value = true;
+  startX.value = e.clientX;
+  startWidth.value = settings.fileTreeWidth;
+  document.body.style.cursor = 'ew-resize';
+  document.body.style.userSelect = 'none';
+
+  const onMove = (m: MouseEvent) => {
+    const dx = m.clientX - startX.value;
+    settings.setFileTreeWidth(startWidth.value + dx);
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    isResizing.value = false;
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/** v4.6.1 — Tolaria-parity "Copy Git URL": repository-backed blob URL for a
+ *  file node, built from the linked remote + relative path (branch=main). */
+async function copyGitUrl(node: Node) {
+  const folder = workspace.currentFolder;
+  const remote = ghSync.status?.remote_url ?? '';
+  const m = remote.match(/(?:@|:\/\/)([^/:]+)[:/]([^/]+)\/(.+?)(?:\.git)?$/i);
+  if (!folder || !m) {
+    toasts.warning(t('explorer.copyGitUrlNoRepo') || 'This workspace has no linked Git remote.');
+    return;
+  }
+  const [, host, owner, repo] = m;
+  const sep = node.path.includes('\\') ? '\\' : '/';
+  const folderNorm = folder.endsWith(sep) ? folder : folder + sep;
+  const rel = node.path.slice(folderNorm.length).split('\\').join('/').split('/').map(encodeURIComponent).join('/');
+  const blobSeg = /gitlab/i.test(host) ? '/-/blob/' : '/blob/';
+  await writeText(`https://${host}/${owner}/${repo}${blobSeg}main/${rel}`);
+  toasts.success(t('explorer.copyGitUrlDone') || 'Git URL copied to clipboard.');
+  closeCtx();
+}
+
+/** #120 — copy the node's absolute filesystem path (file OR folder). */
+async function copyNodePath(node: Node) {
+  await writeText(node.path);
+  toasts.success(t('explorer.copyPathDone') || 'Path copied.');
+  closeCtx();
+}
+
+/** #120 — copy the node's path relative to the workspace root, slash-normalised. */
+async function copyNodeRelativePath(node: Node) {
+  const folder = workspace.currentFolder;
+  const sep = node.path.includes('\\') ? '\\' : '/';
+  let rel = node.path;
+  if (folder) {
+    const folderNorm = folder.endsWith(sep) ? folder : folder + sep;
+    if (node.path.startsWith(folderNorm)) rel = node.path.slice(folderNorm.length);
+  }
+  await writeText(rel.split('\\').join('/'));
+  toasts.success(t('explorer.copyRelPathDone') || 'Relative path copied.');
+  closeCtx();
+}
+const tabs = useTabsStore();
 const { t } = useI18n();
 
 const root = ref<Node | null>(null);
@@ -42,6 +124,11 @@ const TRUNCATED_SENTINEL = '__solomd_truncated__';
 
 async function loadDir(path: string): Promise<{ children: Node[]; truncated: boolean }> {
   try {
+    // #148 — SAF vault: list children via ContentResolver, not std::fs.
+    if (isSafPath(path) && workspace.safTreeUri) {
+      const safChildren = await safList(workspace.safTreeUri, fromSafPath(path));
+      return { children: safChildren as Node[], truncated: false };
+    }
     const entries = await invoke<Entry[]>('list_dir', { path });
     let truncated = false;
     const filtered: Node[] = [];
@@ -66,7 +153,7 @@ async function refreshRoot() {
   }
   const path = workspace.currentFolder;
   root.value = {
-    name: path.split(/[\\/]/).pop() ?? path,
+    name: isSafPath(path) ? workspace.safName ?? 'Vault' : path.split(/[\\/]/).pop() ?? path,
     path,
     is_dir: true,
     expanded: true,
@@ -260,6 +347,16 @@ async function commitEdit() {
       // Default to .md when the user didn't type an extension — we only
       // edit md/txt anyway, so this is the right bias.
       const finalName = /\.[a-z0-9]+$/i.test(name) ? name : `${name}.md`;
+      // #148 — SAF vault: create the file via ContentResolver and open its
+      // content-URI, not a std::fs path.
+      if (isSafPath(e.parent) && workspace.safTreeUri) {
+        const { toSafPath } = await import('../lib/saf-fs');
+        const newDocId = await safCreate(workspace.safTreeUri, fromSafPath(e.parent), finalName);
+        editing.value = null;
+        scheduleRefresh();
+        await files.openPath(toSafPath(newDocId), { bypassNewWindow: true });
+        return;
+      }
       const target = joinPath(e.parent, finalName);
       await invoke('fs_create_file', { path: target, content: '' });
       editing.value = null;
@@ -278,6 +375,37 @@ async function commitEdit() {
       await invoke('fs_rename', { from: e.original, to: target });
       editing.value = null;
       scheduleRefresh();
+      // v4.3.5 — if the renamed file is open in a tab, point the tab at the
+      // new path and (when content might have changed on disk via the
+      // per-file `.assets/` link rewrite) reload from disk for clean tabs.
+      // Dirty tabs keep their in-memory content; user resolves on save.
+      //
+      // #91 fix: the dirty check has to run BEFORE we call markSaved —
+      // markSaved sets savedContent = content as part of its bookkeeping,
+      // so the comparison was always true and dirty tabs lost their
+      // in-memory edits to whatever was on disk. Snapshot first, reload
+      // only if it was already clean.
+      try {
+        const tab = tabs.tabs.find((t: { filePath?: string }) => t.filePath === e.original);
+        if (tab) {
+          const wasClean = tab.savedContent === tab.content;
+          if (wasClean) {
+            // Clean tab: safe to repoint + reload from disk (picks up any
+            // per-file `.assets/` link rewrite the rename triggered).
+            tabs.markSaved(tab.id, target);
+            const fr = await invoke<{ content: string }>('read_file', { path: target });
+            tabs.setContent(tab.id, fr.content);
+            tabs.markSaved(tab.id, target);
+          } else {
+            // Dirty tab: repoint to the new path but KEEP the unsaved edits
+            // AND the dirty flag. markSaved() here would clear savedContent
+            // and silently lose the edits when the tab is later closed (#91).
+            tabs.renamePath(tab.id, target);
+          }
+        }
+      } catch (err) {
+        console.warn('[FileTree.rename] tab refresh failed', err);
+      }
     }
   } catch (err) {
     toasts.error(String(err));
@@ -304,10 +432,15 @@ function onRenameKey(e: KeyboardEvent) {
 
 async function deleteNode(node: Node) {
   closeCtx();
+  // #112 — desktop deletes now go to the OS trash (recoverable); mobile has
+  // no user-visible trash, so keep the permanent-delete wording there.
+  const suffix = isMobile()
+    ? 'This cannot be undone.'
+    : 'It will be moved to the system Trash / Recycle Bin.';
   const ok = window.confirm(
     node.is_dir
-      ? `Delete folder "${node.name}" and everything inside?\n\nThis cannot be undone.`
-      : `Delete "${node.name}"?\n\nThis cannot be undone.`,
+      ? `Delete folder "${node.name}" and everything inside?\n\n${suffix}`
+      : `Delete "${node.name}"?\n\n${suffix}`,
   );
   if (!ok) return;
   try {
@@ -328,14 +461,64 @@ async function revealNode(node: Node) {
   }
 }
 
+// v4.3.5 — workspace switcher dropdown state.
+const switcherOpen = ref(false);
+
+/** Recent folders rendered into the dropdown. Splits each path into the
+ *  basename (display) and the parent dir (subtitle), so two folders named
+ *  `notes/` from different drives are distinguishable. The current folder
+ *  always appears at the top, even if it isn't yet in `recentFolders` —
+ *  defends against the (rare) case where session restore set
+ *  `currentFolder` without going through `setFolder`. */
+const switcherList = computed(() => {
+  const seen = new Set<string>();
+  const out: Array<{ path: string; name: string; parent: string }> = [];
+  const push = (p: string) => {
+    if (!p || seen.has(p)) return;
+    seen.add(p);
+    const parts = p.split(/[\\/]/).filter(Boolean);
+    const name = parts.length > 0 ? parts[parts.length - 1] : p;
+    const parent = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+    out.push({ path: p, name, parent });
+  };
+  if (workspace.currentFolder) push(workspace.currentFolder);
+  for (const p of workspace.recentFolders) push(p);
+  return out;
+});
+
+function toggleSwitcher() {
+  switcherOpen.value = !switcherOpen.value;
+}
+function closeSwitcher() {
+  switcherOpen.value = false;
+}
+async function pickRecentFolder(path: string) {
+  closeSwitcher();
+  if (path === workspace.currentFolder) return;
+  workspace.setFolder(path);
+}
+async function openFolderAndClose() {
+  closeSwitcher();
+  await files.openFolder();
+}
+/** #118 — close the current workspace folder (return to the no-folder state).
+ *  `setFolder(null)` is already a supported "closed workspace" state; this just
+ *  exposes it, since previously a folder once opened could never be closed. */
+function closeFolder() {
+  closeSwitcher();
+  workspace.setFolder(null);
+}
+
 // Close the context menu on any outside click / escape.
 function onWindowClick() {
+  if (switcherOpen.value) closeSwitcher();
   if (!ctx.value) return;
   closeCtx();
 }
 function onWindowKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     closeCtx();
+    closeSwitcher();
     if (editing.value) editing.value = null;
   }
 }
@@ -350,7 +533,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="ftree" @contextmenu.prevent="openCtx($event, null)">
+  <aside
+    class="ftree"
+    :class="{ 'ftree--fullnames': settings.explorerFullNames }"
+    :style="{ '--file-tree-width': settings.fileTreeWidth + 'px' }"
+    @contextmenu.prevent="openCtx($event, null)"
+  >
+    <!-- Width resize handle -->
+    <div
+      class="ftree__resize-handle"
+      :class="{ 'ftree__resize-handle--active': isResizing }"
+      @mousedown="onResizeStart"
+    />
     <div class="ftree__header">
       <span>Explorer</span>
       <div class="ftree__header-btns">
@@ -371,6 +565,12 @@ onBeforeUnmount(() => {
           :title="t('explorer.openFolder') || 'Open folder…'"
           @click="files.openFolder"
         >📁</button>
+        <button
+          v-if="workspace.currentFolder"
+          class="ftree__hbtn"
+          :title="t('explorer.closeFolder') || 'Close folder'"
+          @click="closeFolder"
+        >✕</button>
       </div>
     </div>
 
@@ -378,10 +578,42 @@ onBeforeUnmount(() => {
       <button class="ftree__open-btn" @click="files.openFolder">Open Folder…</button>
     </div>
     <div v-else class="ftree__body">
-      <div
-        class="ftree__root"
-        @contextmenu.prevent="openCtx($event, root)"
-      >{{ root.name }}</div>
+      <!-- v4.3.5: root display doubles as the workspace switcher. Click
+           opens a dropdown listing recent folders + "Open folder…". -->
+      <div class="ftree__root-wrap">
+        <button
+          class="ftree__root ftree__root--btn"
+          :class="{ 'ftree__root--open': switcherOpen }"
+          :title="(t('explorer.switchWorkspace') || 'Switch workspace') + ' · ' + root.path"
+          @click.stop="toggleSwitcher"
+          @contextmenu.prevent="openCtx($event, root)"
+        >
+          <span class="ftree__root-vicon" aria-hidden="true">🗂</span>
+          <span class="ftree__root-name">{{ root.name }}</span>
+          <span class="ftree__root-caret" aria-hidden="true">▾</span>
+        </button>
+        <div v-if="switcherOpen" class="ftree__switcher" @click.stop>
+          <div class="ftree__switcher-label">{{ t('explorer.recentFolders') }}</div>
+          <button
+            v-for="folder in switcherList"
+            :key="folder.path"
+            class="ftree__switcher-item"
+            :class="{ 'ftree__switcher-item--active': folder.path === root.path }"
+            :title="folder.path"
+            @click="pickRecentFolder(folder.path)"
+          >
+            <span class="ftree__switcher-name">{{ folder.name }}</span>
+            <span class="ftree__switcher-path">{{ folder.parent }}</span>
+          </button>
+          <div v-if="switcherList.length === 0" class="ftree__switcher-empty">
+            {{ t('explorer.noRecentFolders') }}
+          </div>
+          <div class="ftree__switcher-sep"></div>
+          <button class="ftree__switcher-item ftree__switcher-item--cta" @click="openFolderAndClose">
+            📁 {{ t('explorer.openFolder') }}
+          </button>
+        </div>
+      </div>
 
       <!-- Inline new/rename input — appears at the top of the tree. -->
       <div v-if="editing" class="ftree__edit">
@@ -397,20 +629,33 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <!-- v2.4: Inbox row. Clicking toggles the inbox-only filter so the
-           tree below shows only docs with `inbox: true` in their YAML. -->
-      <button
+      <!-- v2.4 / v4.6 F6: Inbox row. The chevron toggles the inbox-only tree
+           filter (so the tree below shows only `inbox: true` docs); clicking
+           the name opens the dedicated InboxView workflow. Gated on the
+           v4.6 inbox-workflow opt-out. -->
+      <div
+        v-if="settings.inboxWorkflowEnabled"
         class="ftree__inbox"
         :class="{ 'ftree__inbox--active': showInboxOnly }"
-        :title="showInboxOnly ? t('inbox.filterOff') : t('inbox.filterOn')"
-        @click="inbox.toggleFilter()"
       >
-        <span class="ftree__icon">{{ showInboxOnly ? '▾' : '▸' }}</span>
-        <span class="ftree__name">{{ t('inbox.heading') }}</span>
+        <button
+          class="ftree__inbox-toggle"
+          :title="showInboxOnly ? t('inbox.filterOff') : t('inbox.filterOn')"
+          @click="inbox.toggleFilter()"
+        >
+          <span class="ftree__icon">{{ showInboxOnly ? '▾' : '▸' }}</span>
+        </button>
+        <button
+          class="ftree__inbox-open"
+          :title="t('inbox.openView')"
+          @click="inboxView.openInbox()"
+        >
+          <span class="ftree__name">{{ t('inbox.heading') }}</span>
+        </button>
         <span class="ftree__badge" v-if="inbox.inboxCount.value > 0">
           {{ inbox.inboxCount.value }}
         </span>
-      </button>
+      </div>
 
       <div v-if="root.loading" class="ftree__loading">
         <span class="ftree__spinner" aria-hidden="true"></span>
@@ -456,10 +701,24 @@ onBeforeUnmount(() => {
       <button v-if="ctx.node" class="ftree__ctx-item ftree__ctx-item--danger" @click="deleteNode(ctx.node)">
         🗑 {{ t('explorer.delete') || 'Delete' }}
       </button>
-      <div class="ftree__ctx-sep"></div>
-      <button class="ftree__ctx-item" @click="revealNode(ctx.node ?? root!)">
-        🔍 {{ t('explorer.reveal') || 'Reveal in Finder' }}
+      <button v-if="ctx.node" class="ftree__ctx-item" @click="copyNodePath(ctx.node)">
+        📋 {{ t('explorer.copyPath') || 'Copy Path' }}
       </button>
+      <button v-if="ctx.node" class="ftree__ctx-item" @click="copyNodeRelativePath(ctx.node)">
+        📋 {{ t('explorer.copyRelPath') || 'Copy Relative Path' }}
+      </button>
+      <button v-if="ctx.node && !ctx.node.is_dir" class="ftree__ctx-item" @click="copyGitUrl(ctx.node)">
+        🔗 {{ t('explorer.copyGitUrl') || 'Copy Git URL' }}
+      </button>
+      <!-- #148 follow-up — hidden on mobile: revealItemInDir silently no-ops
+           there (no user-reachable file manager can browse the app sandbox
+           on Android, and iOS has no Finder), so the item just looked broken. -->
+      <template v-if="!isMobile()">
+        <div class="ftree__ctx-sep"></div>
+        <button class="ftree__ctx-item" @click="revealNode(ctx.node ?? root!)">
+          🔍 {{ t('explorer.reveal') || 'Reveal in Finder' }}
+        </button>
+      </template>
     </div>
   </aside>
 </template>
@@ -477,10 +736,81 @@ export const FileTreeNode = defineComponent({
   },
   emits: ['toggle', 'contextmenu'],
   setup(props, { emit }) {
+    // #182 — the full-names toggle lives in settings; this inner component is
+    // module-scoped so it can't close over <script setup>'s store instance.
+    const nodeSettings = useSettingsStore();
     const subtreeHasInbox = (node: any): boolean => {
       if (!node.is_dir) return props.inboxPaths.has(node.path);
       if (!node.children) return false;
       return node.children.some(subtreeHasInbox);
+    };
+
+    // Get file icon based on extension
+    const getFileIcon = (name: string): string => {
+      const ext = name.split('.').pop()?.toLowerCase() || '';
+      const iconMap: Record<string, string> = {
+        // Notes & docs — the markdown family is unified on one glyph so a
+        // vault of .md / .markdown / .mdx reads as one consistent type.
+        'md': '📝', 'markdown': '📝', 'mdx': '📝', 'org': '📝',
+        'txt': '📄', 'text': '📄', 'rtf': '📄', 'tex': '📄',
+        'pdf': '📕', 'epub': '📖',
+        'doc': '📘', 'docx': '📘',
+        'ppt': '📙', 'pptx': '📙', 'key': '📙',
+        'xls': '📊', 'xlsx': '📊', 'csv': '📊', 'tsv': '📊',
+        'canvas': '🗺', 'bib': '📚',
+        // Images
+        'jpg': '🖼', 'jpeg': '🖼', 'png': '🖼', 'gif': '🖼',
+        'webp': '🖼', 'svg': '🖼', 'ico': '🖼', 'bmp': '🖼', 'avif': '🖼',
+        // Audio / video
+        'mp3': '🎵', 'wav': '🎵', 'flac': '🎵', 'm4a': '🎵', 'aac': '🎵', 'ogg': '🎵',
+        'mp4': '🎬', 'mov': '🎬', 'avi': '🎬', 'mkv': '🎬', 'webm': '🎬',
+        // Archives
+        'zip': '📦', 'rar': '📦', '7z': '📦', 'tar': '📦', 'gz': '📦',
+        // Data & config
+        'json': '📋', 'xml': '📋', 'yaml': '📋', 'yml': '📋',
+        'toml': '📋', 'ini': '📋', 'cfg': '📋', 'conf': '📋',
+        'log': '📋', 'sql': '🗃', 'db': '🗃', 'sqlite': '🗃',
+        'env': '🔑', 'lock': '🔒',
+        // Web & code
+        'html': '🌐', 'htm': '🌐',
+        'css': '🎨', 'scss': '🎨', 'less': '🎨',
+        'js': '📜', 'mjs': '📜', 'cjs': '📜', 'jsx': '📜',
+        'ts': '📜', 'tsx': '📜', 'vue': '💚',
+        'py': '🐍', 'java': '☕', 'rb': '💎', 'php': '🐘',
+        'c': '⚙', 'h': '⚙', 'cpp': '⚙', 'cc': '⚙', 'hpp': '⚙',
+        'go': '🐹', 'rs': '🦀',
+        'sh': '🐚', 'bash': '🐚', 'zsh': '🐚',
+        // Extension-less well-known names (split('.').pop() returns the name)
+        'makefile': '🔧', 'dockerfile': '🐳', 'license': '📜', 'gitignore': '🚫',
+      };
+      return iconMap[ext] || '📄';
+    };
+
+    // Truncate filename in the middle: keep start and extension, ellipsis in middle
+    const truncateFileName = (name: string, maxLength: number = 30): string => {
+      if (name.length <= maxLength) return name;
+
+      const lastDotIndex = name.lastIndexOf('.');
+      if (lastDotIndex === -1) {
+        // No extension: simple truncation
+        const half = Math.floor((maxLength - 3) / 2);
+        return name.slice(0, half) + '...' + name.slice(-half);
+      }
+
+      const ext = name.slice(lastDotIndex); // includes the dot
+      const baseName = name.slice(0, lastDotIndex);
+      const extLength = ext.length;
+
+      // Reserve space for extension and ellipsis
+      const availableForBase = maxLength - extLength - 3;
+      if (availableForBase < 4) {
+        // Extension is too long, truncate extension instead
+        const half = Math.floor((maxLength - 3) / 2);
+        return name.slice(0, half) + '...' + name.slice(-half);
+      }
+
+      const half = Math.floor(availableForBase / 2);
+      return baseName.slice(0, half) + '...' + baseName.slice(-half) + ext;
     };
 
     return () => {
@@ -491,6 +821,12 @@ export const FileTreeNode = defineComponent({
         if (n.is_dir && n.children && !subtreeHasInbox(n)) return [];
       }
       const indent = 8 + props.depth * 12;
+
+      // Use truncated name for display, full name in tooltip. #182 — the
+      // full-names setting skips JS mid-ellipsis; CSS wraps instead.
+      const displayName =
+        !n.is_dir && !nodeSettings.explorerFullNames ? truncateFileName(n.name) : n.name;
+
       const items: any[] = [
         h(
           'li',
@@ -506,8 +842,8 @@ export const FileTreeNode = defineComponent({
             title: n.path,
           },
           [
-            h('span', { class: 'ftree__icon' }, n.is_dir ? (n.expanded ? '▾' : '▸') : '•'),
-            h('span', { class: 'ftree__name' }, n.name),
+            h('span', { class: 'ftree__icon' }, n.is_dir ? (n.expanded ? '▾' : '▸') : getFileIcon(n.name)),
+            h('span', { class: 'ftree__name' }, displayName),
             !n.is_dir && props.inboxPaths.has(n.path)
               ? h('span', { class: 'ftree__inbox-dot', title: 'inbox' }, '●')
               : null,
@@ -536,13 +872,14 @@ export const FileTreeNode = defineComponent({
 
 <style scoped>
 .ftree {
-  width: 240px;
+  width: var(--file-tree-width, 240px);
   height: 100%;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   user-select: none;
+  position: relative;
 }
 .ftree__header {
   display: flex;
@@ -596,6 +933,9 @@ export const FileTreeNode = defineComponent({
   overflow-y: auto;
   padding-bottom: 12px;
 }
+.ftree__root-wrap {
+  position: relative;
+}
 .ftree__root {
   padding: 8px 14px;
   font-size: 11px;
@@ -603,6 +943,142 @@ export const FileTreeNode = defineComponent({
   color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+/* v4.6 — workspace switcher reads as an obviously-clickable control
+   (distinct pill + folder glyph + caret), not a static section label. */
+.ftree__root--btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: calc(100% - 16px);
+  margin: 6px 8px 4px;
+  padding: 7px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur-fast, 120ms) var(--ease),
+    border-color var(--dur-fast, 120ms) var(--ease);
+}
+.ftree__root--btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.ftree__root--btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.ftree__root--open {
+  background: var(--accent-soft, rgba(255, 159, 64, 0.1));
+  border-color: var(--accent);
+}
+.ftree__root-vicon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+}
+.ftree__root-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.ftree__root-caret {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  transition: transform var(--dur-fast, 120ms) var(--ease),
+    color var(--dur-fast, 120ms) var(--ease);
+}
+.ftree__root--btn:hover .ftree__root-caret,
+.ftree__root--open .ftree__root-caret {
+  color: var(--accent);
+}
+.ftree__root--open .ftree__root-caret {
+  transform: rotate(180deg);
+}
+.ftree__switcher {
+  position: absolute;
+  top: 100%;
+  left: 6px;
+  right: 6px;
+  z-index: 30;
+  margin-top: 2px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.ftree__switcher-label {
+  padding: 6px 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ftree__switcher-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  border-radius: 4px;
+}
+.ftree__switcher-item:hover {
+  background: var(--bg-hover);
+}
+.ftree__switcher-item--active {
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+.ftree__switcher-item--cta {
+  color: var(--accent, #ff9f40);
+  font-weight: 600;
+}
+.ftree__switcher-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.ftree__switcher-path {
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  direction: rtl;
+  text-align: left;
+}
+.ftree__switcher-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.ftree__switcher-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 .ftree__list {
   list-style: none;
@@ -635,16 +1111,31 @@ export const FileTreeNode = defineComponent({
 }
 :deep(.ftree__item--file .ftree__icon) {
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 14px;
+  line-height: 1;
 }
 :deep(.ftree__name) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* For very long filenames, keep the start and end visible with ellipsis in middle */
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
 }
 :deep(.ftree__item--dir .ftree__name) {
   font-weight: 600;
   color: var(--text);
+}
+/* #182 — full-filename mode: wrap long names across lines instead of the
+ * JS mid-ellipsis, so large doc sets with long shared prefixes stay
+ * scannable. */
+.ftree--fullnames :deep(.ftree__name) {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  -webkit-line-clamp: unset;
+  line-height: 1.3;
 }
 :deep(.ftree__inbox-dot) {
   color: var(--accent);
@@ -661,7 +1152,6 @@ export const FileTreeNode = defineComponent({
   color: var(--text-muted);
   background: transparent;
   border: none;
-  cursor: pointer;
   text-align: left;
   border-radius: 0;
 }
@@ -671,6 +1161,23 @@ export const FileTreeNode = defineComponent({
 }
 .ftree__inbox--active {
   color: var(--accent);
+}
+.ftree__inbox-toggle,
+.ftree__inbox-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+.ftree__inbox-open {
+  flex: 1;
+  min-width: 0;
 }
 .ftree__badge {
   margin-left: auto;
@@ -758,5 +1265,33 @@ export const FileTreeNode = defineComponent({
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+/* Width resize handle */
+.ftree__resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.ftree__resize-handle:hover,
+.ftree__resize-handle--active {
+  background: var(--accent, #ff9f40);
+  opacity: 0.4;
+}
+
+/* Better filename display with middle ellipsis for very long names */
+:deep(.ftree__name) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 </style>
