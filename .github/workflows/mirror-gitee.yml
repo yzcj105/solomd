@@ -24,17 +24,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Check for Gitee secret
+        id: gate
+        env:
+          KEY: ${{ secrets.GITEE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GITEE_PRIVATE_KEY not set on this repo — skipping mirror. Configure repo secrets GITEE_PRIVATE_KEY + GITEE_USERNAME to enable."
+          fi
+
       - name: Checkout (full history, all refs)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Add Gitee SSH key
+        if: steps.gate.outputs.run == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.GITEE_PRIVATE_KEY }}
 
       - name: Trust gitee.com host key
+        if: steps.gate.outputs.run == 'true'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -53,6 +68,7 @@ jobs:
           exit 1
 
       - name: Push everything to Gitee
+        if: steps.gate.outputs.run == 'true'
         env:
           GITEE_USER: ${{ secrets.GITEE_USERNAME }}
           # Keepalive prevents "client_loop: send disconnect: Broken pipe"
