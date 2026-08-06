@@ -36,12 +36,28 @@ jobs:
 
       - name: Trust gitee.com host key
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          ssh-keyscan -t ed25519 -H gitee.com >> ~/.ssh/known_hosts 2>/dev/null
+          # Retry: gitee.com is intermittently slow/unreachable from GH runners.
+          for i in 1 2 3 4 5; do
+            if ssh-keyscan -T 10 -t ed25519 -H gitee.com >> ~/.ssh/known_hosts 2>/dev/null; then
+              # keyscan writes nothing on failure; confirm we actually got a key
+              if grep -q gitee.com ~/.ssh/known_hosts; then
+                exit 0
+              fi
+            fi
+            echo "ssh-keyscan attempt $i failed; retrying..." >&2
+            sleep $((i * 3))
+          done
+          echo "ssh-keyscan gitee.com failed after 5 attempts" >&2
+          exit 1
 
       - name: Push everything to Gitee
         env:
           GITEE_USER: ${{ secrets.GITEE_USERNAME }}
+          # Keepalive prevents "client_loop: send disconnect: Broken pipe"
+          # when Gitee stalls partway through a large push.
+          GIT_SSH_COMMAND: "ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o ConnectTimeout=30"
         run: |
           set -euo pipefail
           REMOTE="git@gitee.com:${GITEE_USER}/solomd.git"
@@ -50,6 +66,15 @@ jobs:
           # Mirror GitHub's branches (origin/*) and tags explicitly;
           # `--prune` deletes Gitee refs that no longer exist on GitHub.
           git remote set-head origin -d
-          git push --prune --force "$REMOTE" \
-            "refs/remotes/origin/*:refs/heads/*" \
-            "refs/tags/*:refs/tags/*"
+          # Retry: Gitee occasionally drops the SSH stream mid-push.
+          for i in 1 2 3; do
+            if git push --prune --force "$REMOTE" \
+                "refs/remotes/origin/*:refs/heads/*" \
+                "refs/tags/*:refs/tags/*"; then
+              exit 0
+            fi
+            echo "push attempt $i failed; retrying..." >&2
+            sleep $((i * 10))
+          done
+          echo "gitee push failed after 3 attempts" >&2
+          exit 1
