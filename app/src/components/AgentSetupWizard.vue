@@ -9,7 +9,12 @@
  *
  * Steps:
  *   1. Choice: Cloud BYOK · Local Ollama · Skip
- *   2a. Cloud:  pick provider (Anthropic / OpenAI / Gemini default), paste key, verify
+ *   2a. Cloud:  pick provider, paste key, verify. The provider list is the
+ *       shared registry (PROVIDERS), not a hand-picked subset — before
+ *       4.11.19 it was four hardcoded brands, so anyone on a relay endpoint
+ *       or a self-hosted OpenAI-compatible server had to skip the wizard and
+ *       go to Settings → AI to reach a base-URL field (#261). The base URL is
+ *       editable here for the same reason, pre-filled from the provider.
  *   2b. Ollama: detect → "Install Ollama" link if missing, "Pull qwen2.5:1.5b" if no model
  *   3. Done — closes wizard, marks `agentWizardSeen` so it doesn't re-fire.
  */
@@ -18,7 +23,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useSettingsStore } from '../stores/settings';
 import { useToastsStore } from '../stores/toasts';
-import { providerById } from '../lib/ai-providers';
+import { PROVIDERS, providerById } from '../lib/ai-providers';
+import type { ProviderId } from '../lib/ai-providers';
 import { useI18n } from '../i18n';
 
 const props = defineProps<{ open: boolean }>();
@@ -32,22 +38,31 @@ type Step = 'choose' | 'cloud' | 'ollama' | 'done';
 const step = ref<Step>('choose');
 
 // ---- Cloud branch ----------------------------------------------------------
-type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'deepseek';
-const cloudProvider = ref<CloudProvider>('anthropic');
+// Everything in the registry except Ollama, which is the other branch of
+// this wizard. `openai-compat` stays in the list — a self-hosted server is
+// exactly the case that needs the base-URL field below.
+const cloudProviders = PROVIDERS.filter((p) => p.id !== 'ollama');
+const cloudProvider = ref<ProviderId>('anthropic');
 const cloudKey = ref('');
+// Pre-filled from the provider, editable: relay/mirror endpoints are common
+// for the CN providers, and a self-hosted server has no default at all.
+const cloudBaseUrl = ref(providerById('anthropic')?.defaultBaseUrl ?? '');
 const verifying = ref(false);
 const verifyResult = ref<'ok' | 'fail' | null>(null);
 const verifyMessage = ref('');
 
-const cloudModels: Record<CloudProvider, string> = {
-  anthropic: 'claude-sonnet-4-6',
-  openai: 'gpt-4o-mini',
-  gemini: 'gemini-2.5-flash',
-  deepseek: 'deepseek-chat',
-};
+const cloudConfig = computed(() => providerById(cloudProvider.value));
+/** Local runtimes (`openai-compat`) may legitimately have no key at all. */
+const cloudNeedsKey = computed(() => !cloudConfig.value?.keyless);
+
+function onCloudProviderChange(): void {
+  cloudBaseUrl.value = cloudConfig.value?.defaultBaseUrl ?? '';
+  verifyResult.value = null;
+  verifyMessage.value = '';
+}
 
 async function saveCloudKey() {
-  if (!cloudKey.value.trim()) {
+  if (cloudNeedsKey.value && !cloudKey.value.trim()) {
     toasts.error(t('wizard.errKeyEmpty'));
     return;
   }
@@ -55,10 +70,12 @@ async function saveCloudKey() {
   verifyResult.value = null;
   verifyMessage.value = '';
   try {
-    await invoke('ai_set_key', {
-      provider: cloudProvider.value,
-      key: cloudKey.value.trim(),
-    });
+    if (cloudKey.value.trim()) {
+      await invoke('ai_set_key', {
+        provider: cloudProvider.value,
+        key: cloudKey.value.trim(),
+      });
+    }
     // Quick verify — same command (and SAME ARGS) the AI Settings panel
     // uses. `ai_verify_key` switches on the wire format, not the brand id:
     // without `apiFormat` it falls back to the provider id ("deepseek",
@@ -66,13 +83,17 @@ async function saveCloudKey() {
     // whose id isn't literally "openai"/"anthropic"/"ollama". Pass the
     // provider config's apiFormat + defaultBaseUrl (and the key directly,
     // avoiding a keystore read race) so DeepSeek/Gemini/etc. verify cleanly.
-    const cfg = providerById(cloudProvider.value);
+    const cfg = cloudConfig.value;
+    const baseUrl = cloudBaseUrl.value.trim() || cfg?.defaultBaseUrl || null;
     try {
       await invoke('ai_verify_key', {
         provider: cloudProvider.value,
         key: cloudKey.value.trim(),
         apiFormat: cfg?.apiFormat || 'openai',
-        baseUrl: cfg?.defaultBaseUrl || null,
+        baseUrl,
+        // Lets the Rust side fall back to a chat ping when the endpoint
+        // has no GET /models to list (#261).
+        model: cfg?.defaultModel || null,
       });
       verifyResult.value = 'ok';
       verifyMessage.value = t('wizard.verifyOk');
@@ -82,7 +103,10 @@ async function saveCloudKey() {
       // Key was saved anyway; the user can fix the model later.
     }
     settings.setAiProvider(cloudProvider.value);
-    settings.setAiModel(cloudModels[cloudProvider.value]);
+    settings.setAiModel(cfg?.defaultModel || '');
+    // Only persist an override; leaving the default in place means a later
+    // provider-side URL change still reaches the user.
+    settings.setAiBaseUrl(baseUrl && baseUrl !== cfg?.defaultBaseUrl ? baseUrl : '');
     if (!settings.aiEnabled) settings.toggleAiEnabled();
     if (verifyResult.value === 'ok') {
       step.value = 'done';
@@ -98,9 +122,12 @@ async function saveCloudKey() {
 // ---- Ollama branch ---------------------------------------------------------
 //
 // The Tauri command shape mirrors `app/src-tauri/src/ollama.rs`:
-//   - `ollama_detect()` → `{ ok, version?, models }`
-//   - `ollama_pull({ model, request_id })` resolves when done; progress is
-//     pushed as `solomd://ollama-pull` events tagged with our `request_id`.
+//   - `ollama_detect({ baseUrl })` → `{ ok, version?, models }`
+//   - `ollama_pull({ model, request_id, baseUrl })` resolves when done;
+//     progress is pushed as `solomd://ollama-pull` events tagged with our
+//     `request_id`.
+// `baseUrl` is optional and defaults to localhost; we pass the configured
+// one so a user who already pointed SoloMD at a LAN box sees it here too.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 interface OllamaDetect {
@@ -122,7 +149,9 @@ let pullRequestId: string | null = null;
 async function detectOllama() {
   detecting.value = true;
   try {
-    ollama.value = await invoke<OllamaDetect>('ollama_detect');
+    ollama.value = await invoke<OllamaDetect>('ollama_detect', {
+      baseUrl: settings.aiBaseUrl || undefined,
+    });
   } catch (e) {
     toasts.error(`Ollama detect: ${e}`);
   } finally {
@@ -169,7 +198,11 @@ async function pullRecommended() {
   });
 
   try {
-    await invoke('ollama_pull', { model: 'qwen2.5:1.5b', requestId: pullRequestId });
+    await invoke('ollama_pull', {
+      model: 'qwen2.5:1.5b',
+      requestId: pullRequestId,
+      baseUrl: settings.aiBaseUrl || undefined,
+    });
     toasts.success(t('wizard.ollamaPullDone'));
     await detectOllama();
   } catch (e) {
@@ -223,14 +256,14 @@ function finish() {
 const ollamaCanAdopt = computed(
   () => ollama.value.ok && ollama.value.models.length > 0,
 );
-// Default Ollama base — Settings.aiBaseUrl can override at the AI layer,
-// but the wizard just shows the canonical one for the success messages.
-const ollamaUrl = 'http://localhost:11434';
+// The address the wizard reports in its success messages: whatever the AI
+// settings point at, falling back to the canonical local one.
+const ollamaUrl = computed(() => settings.aiBaseUrl || 'http://localhost:11434');
 
 onMounted(() => {
   // Pre-detect ollama in the background so the choice card can highlight
   // the local option if it's already installed (subtle dot, no claim).
-  invoke<OllamaDetect>('ollama_detect')
+  invoke<OllamaDetect>('ollama_detect', { baseUrl: settings.aiBaseUrl || undefined })
     .then((s) => {
       ollama.value = s;
     })
@@ -311,16 +344,26 @@ function onCloudKeyKey(e: KeyboardEvent) {
 
         <div class="wiz__row">
           <label>{{ t('wizard.providerLabel') }}</label>
-          <select v-model="cloudProvider" class="wiz__sel">
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (ChatGPT)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="deepseek">DeepSeek</option>
+          <select v-model="cloudProvider" class="wiz__sel" @change="onCloudProviderChange">
+            <option v-for="p in cloudProviders" :key="p.id" :value="p.id">
+              {{ p.label }}
+            </option>
           </select>
         </div>
 
         <div class="wiz__row">
-          <label>{{ t('wizard.keyLabel') }}</label>
+          <label>{{ t('wizard.baseUrlLabel') }}</label>
+          <input
+            v-model="cloudBaseUrl"
+            type="text"
+            class="wiz__inp"
+            :placeholder="cloudConfig?.defaultBaseUrl || 'https://…/v1'"
+            spellcheck="false"
+          />
+        </div>
+
+        <div class="wiz__row">
+          <label>{{ cloudNeedsKey ? t('wizard.keyLabel') : t('wizard.keyOptionalLabel') }}</label>
           <input
             v-model="cloudKey"
             type="password"

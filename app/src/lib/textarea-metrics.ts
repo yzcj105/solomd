@@ -90,8 +90,12 @@ export function measureLineHeights(el: HTMLTextAreaElement, text: string): numbe
   }
 }
 
-/** Y offset (px, from content top) of the caret placed at `pos` in `text`. */
-function caretTopAt(mirror: HTMLDivElement, text: string, pos: number): number {
+/** X/Y offset (px, from content top-left) of the caret placed at `pos`. */
+function caretPointAt(
+  mirror: HTMLDivElement,
+  text: string,
+  pos: number,
+): { left: number; top: number } {
   mirror.textContent = '';
   const before = document.createElement('span');
   before.textContent = text.slice(0, pos);
@@ -100,7 +104,79 @@ function caretTopAt(mirror: HTMLDivElement, text: string, pos: number): number {
   const after = document.createElement('span');
   after.textContent = text.slice(pos);
   mirror.append(before, marker, after);
-  return marker.offsetTop;
+  return { left: marker.offsetLeft, top: marker.offsetTop };
+}
+
+/** Y offset (px, from content top) of the caret placed at `pos` in `text`. */
+function caretTopAt(mirror: HTMLDivElement, text: string, pos: number): number {
+  return caretPointAt(mirror, text, pos).top;
+}
+
+/**
+ * Caret's top offset in px, measured from the start of the text flow (so it
+ * ignores the textarea's scroll position and padding — add those back at the
+ * call site). Used to anchor the autocomplete popup to the caret's own row in
+ * the flat (non-block) plain editor, where the document is one long textarea
+ * and anchoring to the element's top would put the popup nowhere near the
+ * caret. Soft wrap is accounted for, since the mirror wraps identically.
+ */
+export function caretTopPx(el: HTMLTextAreaElement, text: string, pos: number): number {
+  const mirror = createMirror(el);
+  try {
+    return caretTopAt(mirror, text, pos);
+  } finally {
+    mirror.remove();
+  }
+}
+
+export interface CaretPoint {
+  /** Px from the left edge of the text flow (padding excluded). */
+  left: number;
+  /** Px from the top of the text flow (padding and scroll excluded). */
+  top: number;
+  /** Row height at the caret — the drawn caret's height. */
+  height: number;
+}
+
+/**
+ * Where to draw a caret of our own. The native <textarea> caret always
+ * blinks — no CSS turns that off — so 实心光标 (#316) hides it and paints a
+ * non-blinking bar at these coordinates, the same 2px accent bar that
+ * CodeMirror's drawSelection() gives the other editor path.
+ *
+ * Callers add back the textarea's padding and subtract its scroll offsets.
+ * Pass the *current logical line* rather than the whole document when the
+ * textarea holds a large one: the mirror lays out every character it is
+ * given, and this runs on every keystroke.
+ */
+export function caretPointPx(el: HTMLTextAreaElement, text: string, pos: number): CaretPoint {
+  const mirror = createMirror(el);
+  const lh = lineHeightPx(el);
+  try {
+    const at = Math.max(0, Math.min(pos, text.length));
+    mirror.textContent = '';
+    const before = document.createElement('span');
+    before.textContent = text.slice(0, at);
+    const marker = document.createElement('span');
+    marker.textContent = '​';
+    const after = document.createElement('span');
+    after.textContent = text.slice(at);
+    mirror.append(before, marker, after);
+    // Rects, not offsetTop/offsetLeft: those are integers, and a caret that
+    // rounds is a caret that sits half a pixel off its own glyphs. The marker
+    // spans the *glyph* box, so lift it by the half-leading to get the top of
+    // the line box — where a full-line-height caret starts, same as the
+    // CodeMirror one.
+    const base = mirror.getBoundingClientRect();
+    const rect = marker.getBoundingClientRect();
+    return {
+      left: rect.left - base.left,
+      top: rect.top - base.top - Math.max(0, (lh - rect.height) / 2),
+      height: lh,
+    };
+  } finally {
+    mirror.remove();
+  }
 }
 
 export interface CaretRowInfo {

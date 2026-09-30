@@ -12,9 +12,19 @@ const docs = [
     lead: 'Install, open a folder, tabs, view modes, saving — the three-minute tour.',
   },
   {
+    slug: 'linux',
+    title: 'Linux Requirements',
+    lead: 'Will SoloMD run on my Linux, and which file do I download? A flowchart and a distro table.',
+  },
+  {
     slug: 'editor',
     title: 'The Editor',
     lead: 'Live rendering, images, tables, math, diagrams, Vim, focus & typewriter modes.',
+  },
+  {
+    slug: 'images',
+    title: 'Images & Attachments',
+    lead: 'Where pasted screenshots go — rename _assets, per-note folders, Typora-style path templates.',
   },
   {
     slug: 'workspace',
@@ -25,6 +35,11 @@ const docs = [
     slug: 'sync',
     title: 'Sync, History & Backup',
     lead: 'GitHub sync with optional E2EE, Git snapshots with rollback, and 401 troubleshooting.',
+  },
+  {
+    slug: 'icloud',
+    title: 'Sync with iCloud',
+    lead: 'No account, no plugin — put the notes folder in iCloud Drive. Mac / iPhone steps and conflict caveats.',
   },
   {
     slug: 'ai',
@@ -70,7 +85,7 @@ const docs = [
   lang={lang}
 >
   <Header lang={lang} />
-  <main>
+  <main id="main">
     <section class="container docs-index">
       <h1>Documentation</h1>
       <p class="lead">

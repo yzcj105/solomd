@@ -13,6 +13,17 @@
 
 ![SoloMD editor](web/public/demo/solomd-demo.svg)
 
+> ### 🤖 Built and maintained by Claude
+>
+> SoloMD is written, tested and released almost entirely by **Claude Code**, Anthropic's
+> coding agent, working under a human maintainer who sets the direction and decides what
+> ships. **Issues and pull requests are triaged and answered by Claude as well** — the
+> replies you get here are written by an AI, not typed by a person.
+>
+> We are telling you this for two reasons. You should know what you are trusting with your
+> notes: read the code, it is MIT and all of it is public. And when a reply is confidently
+> wrong — it happens — say so in the thread. That correction is the mechanism.
+
 Your notes live in a folder. **SoloMD is the editor on top — with a first-class agent surface inside the editor, and the MCP endpoint Claude Code / Cursor can drive from outside.** Same `.md` files. Chat with your vault. Schedule recipes that run when you're not at the keyboard. Hand the same vault to any MCP client.
 
 Built on Tauri 2 + Vue 3 + CodeMirror 6. Universal macOS dmg ~32 MB. Free, MIT, no subscription, no SoloMD-hosted servers. Your notes, AI keys, embeddings index, and git history all stay on your machine.
@@ -161,7 +172,7 @@ The bundled `solomd-mcp` server runs against any folder of Markdown files — yo
 Available as:
 
 - **[Skill Pack](https://github.com/zhitongblog/solomd/releases/latest/download/solomd-skills-v4.4.1.zip)** — 11 reference Agent Recipes (weekly review, todo extract, link suggester, …) you can drop into `<vault>/.solomd/agents/`. Ships with every release.
-- **[Claude Code Skill](marketplace/claude-code-skill/)** — `SKILL.md` + `install.sh` that wires `solomd-mcp` into `~/.claude/mcp.json` and exposes the 13 tools to Claude Code with patterns and starter recipes.
+- **[Claude Code Skill](marketplace/claude-code-skill/)** — `SKILL.md` + `install.sh` that registers `solomd-mcp` as a user-scope MCP server and exposes the 13 tools to Claude Code with patterns and starter recipes.
 - **Smithery** — `smithery.yaml` + Dockerfile at [`marketplace/smithery/`](marketplace/smithery/) (submission pending).
 - **Awesome MCP Servers** — PR entries for the three biggest community indices (`punkpeye/`, `appcypher/`, `wong2/awesome-mcp-servers`, ~14k forks combined) at [`marketplace/awesome-mcp/`](marketplace/awesome-mcp/).
 
@@ -231,6 +242,12 @@ One maintainer, two front doors. Async on [GitHub Discussions](https://github.co
 <a href="https://solomd.app/#contact"><img src="web/public/contact/wechat.jpg" alt="WeChat — 智通" width="180" /></a>
 &nbsp;&nbsp;
 <a href="https://t.me/SOLOMDAPP"><img src="web/public/contact/telegram.jpg" alt="Telegram @SOLOMDAPP" width="180" /></a>
+
+<!-- sponsors:start -->
+## Sponsors
+
+Thank you to everyone who sponsors SoloMD: **tyysoft(太阳雨)**
+<!-- sponsors:end -->
 
 ## License & credits
 

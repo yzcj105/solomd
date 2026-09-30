@@ -5,7 +5,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { setMarkdownHardBreaks, setMarkdownAutoNumberHeadings } from './lib/markdown';
+import { readText as readClipboardText } from '@tauri-apps/plugin-clipboard-manager';
+import { setMarkdownHardBreaks, setMarkdownAutoNumberHeadings, setMarkdownSmartQuotes } from './lib/markdown';
+import { openNewWindow } from './lib/new-window';
 import Toolbar from './components/Toolbar.vue';
 import TelemetryBanner from './components/TelemetryBanner.vue';
 import TileRoot from './components/TileRoot.vue';
@@ -18,6 +20,9 @@ import AndroidFolderPicker from './components/AndroidFolderPicker.vue';
 import NeighborhoodPanel from './components/NeighborhoodPanel.vue';
 import RelationshipsPanel from './components/RelationshipsPanel.vue';
 import TagsPanel from './components/TagsPanel.vue';
+import TasksPanel from './components/TasksPanel.vue';
+import TableEditor from './components/TableEditor.vue';
+import FormulaEditor from './components/FormulaEditor.vue';
 import TypesPanel from './components/TypesPanel.vue';
 import HistoryPanel from './components/HistoryPanel.vue';
 import PropertiesInspector from './components/PropertiesInspector.vue';
@@ -55,7 +60,7 @@ import FileChangedDialog from './components/FileChangedDialog.vue';
 import ImageUrlDialog from './components/ImageUrlDialog.vue';
 import Toast from './components/Toast.vue';
 import { useTabsStore } from './stores/tabs';
-import { useSettingsStore, buildEditorFontStack } from './stores/settings';
+import { useSettingsStore, buildEditorFontStack, setRightSidebarShell } from './stores/settings';
 import { useWindowsStore, isAuxLabel } from './stores/windows';
 import { useTilesStore } from './stores/tiles';
 import { usePomodoroStore } from './stores/pomodoro';
@@ -65,11 +70,17 @@ import { useShortcuts } from './composables/useShortcuts';
 import { useFileWatcher } from './composables/useFileWatcher';
 import { loadCustomTheme } from './lib/custom-theme';
 import { isIOS, isMacOS, isAndroid, isMobile } from './lib/platform';
+import { useViewport } from './composables/useViewport';
+import { nativeMenuAccelerators } from './lib/keybindings';
 import { useI18n } from './i18n';
+import { quickCaptureError } from './lib/quick-capture-status';
+import { tableEditor, closeTableEditor } from './lib/table-editor-bus';
+import { formulaEditor, closeFormulaEditor } from './lib/formula-editor-bus';
 import { track } from './lib/telemetry';
 import { openWelcomeTour } from './lib/welcome-tour';
 import { useWorkspaceStore } from './stores/workspace';
 import { useWorkspaceIndexStore } from './stores/workspaceIndex';
+import { useSavedViewsStore } from './stores/savedViews';
 import { usePropertiesStore } from './stores/properties';
 import { useRagStore } from './stores/rag';
 import { IS_APP_STORE_BUILD } from './lib/app-build';
@@ -154,6 +165,20 @@ const { t } = useI18n();
 
 const cursorLine = ref(1);
 const cursorCol = ref(1);
+// #350 — in preview mode the outline follows the reading position (the
+// block at the top of the focused pane's preview) instead of the editor
+// cursor, which doesn't move while reading. Null until the preview reports.
+const previewTopLine = ref<number | null>(null);
+window.addEventListener('solomd:preview-topline', (e: Event) => {
+  const { line, paneId } = (e as CustomEvent).detail || {};
+  if (paneId && paneId !== tiles.focusedPaneId) return;
+  if (typeof line === 'number' && line > 0) previewTopLine.value = line;
+});
+const outlineLine = computed(() =>
+  settings.viewMode === 'preview' && previewTopLine.value != null
+    ? previewTopLine.value
+    : cursorLine.value,
+);
 // v4.3.0 issue #70: selection text from the editor, surfaced in StatusBar
 // as "selected: N words / M chars". Empty string when nothing is selected.
 const selectionText = ref('');
@@ -206,6 +231,7 @@ function rsPaneSnapshot() {
     showBacklinks: settings.showBacklinks,
     showRelationships: settings.showRelationships,
     showTagsPanel: settings.showTagsPanel,
+    showTasksPanel: settings.showTasksPanel,
     showNeighborhood: settings.showNeighborhood,
     showTypesPanel: settings.showTypesPanel,
     showHistoryPanel: settings.showHistoryPanel,
@@ -223,6 +249,7 @@ function ctxToggle(toggleFn: () => void) {
     !settings.showBacklinks &&
     !settings.showRelationships &&
     !settings.showTagsPanel &&
+    !settings.showTasksPanel &&
     !showNeighborhoodPane.value &&
     !settings.showTypesPanel &&
     !settings.showHistoryPanel &&
@@ -233,6 +260,31 @@ function ctxToggle(toggleFn: () => void) {
     settings.ensureRightSidebarVisible();
   }
   closeSidebarCtx();
+}
+
+/**
+ * #209 — every way of opening the search pane has to go through `ctxToggle`,
+ * never a bare `searchOpen` flip.
+ *
+ * `showRightSidebar` lets the persisted `rightSidebarHidden` master toggle win
+ * over the individual panes, so once the user has dismissed the strip (toolbar
+ * ×, ⌥⌘B, palette) flipping `searchOpen` renders nothing at all: ⌘⇧F, the
+ * toolbar button and View → Search in Folder each looked completely dead, and
+ * pressing again silently flipped the flag back off. The other panes never hit
+ * this because they were already routed through `ctxToggle`, which un-hides the
+ * strip when a toggle turns a pane on.
+ */
+function toggleGlobalSearch() {
+  ctxToggle(() => {
+    searchOpen.value = !searchOpen.value;
+  });
+}
+
+/** As above, but for callers that mean "show it", not "flip it". */
+function openGlobalSearchPane() {
+  ctxToggle(() => {
+    searchOpen.value = true;
+  });
 }
 
 const ragSearchOpen = ref(false);
@@ -292,7 +344,7 @@ useShortcuts({
   openPalette: () => (paletteOpen.value = true),
   openSettings: () => (settingsOpen.value = true),
   openHelp: () => (helpOpen.value = true),
-  openGlobalSearch: () => (searchOpen.value = !searchOpen.value),
+  openGlobalSearch: () => toggleGlobalSearch(),
   openRagSearch: () => (ragSearchOpen.value = true),
   openQuickSwitcher: () => (quickSwitcherOpen.value = true),
   openCjkProofread: () => (cjkProofreadOpen.value = true),
@@ -306,17 +358,36 @@ useFileWatcher(showFileChangedDialog);
 // here (browsers set ctrlKey on pinch), so pinch-to-zoom works too. passive:false
 // lets us preventDefault so the page doesn't scroll while zooming.
 let lastWheelZoomAt = 0;
+// #215 — how much wheel delta has to accumulate before one 0.1 zoom step
+// fires. The old code stepped on any `deltaY !== 0`, so on macOS — where Cmd
+// is held constantly for ⌘S, ⌘Tab, ⌘-click — a trackpad resting under a
+// drifting finger emits deltas of well under 1 and silently rescaled the whole
+// app ("有时候鼠标、触摸板没有滚动也容易引起缩放"). Rate-throttling alone could
+// not fix that: it caps how often a step fires, not how little input it takes.
+const WHEEL_ZOOM_STEP_DELTA = 12;
+let wheelZoomAccum = 0;
 function onWheelZoom(e: WheelEvent): void {
   if (!(e.ctrlKey || e.metaKey)) return;
+  if (!settings.wheelZoomEnabled) return; // #215 — gesture switched off entirely
   e.preventDefault();
   if (e.deltaY === 0) return;
+
+  // Reverse of direction ends a gesture: drop the accumulator so a deliberate
+  // zoom-out right after a zoom-in isn't swallowed by leftover opposite delta.
+  if (wheelZoomAccum !== 0 && Math.sign(e.deltaY) !== Math.sign(wheelZoomAccum)) {
+    wheelZoomAccum = 0;
+  }
+  wheelZoomAccum += e.deltaY;
+  if (Math.abs(wheelZoomAccum) < WHEEL_ZOOM_STEP_DELTA) return;
+
   // #125 — a trackpad pinch / momentum wheel fires dozens of events per gesture;
   // applying a 0.1 step to each rocketed the zoom and made the layout shake.
   // Throttle to one step per ~60ms so zooming is smooth and controllable.
   const now = Date.now();
   if (now - lastWheelZoomAt < 60) return;
   lastWheelZoomAt = now;
-  const dir = e.deltaY < 0 ? 1 : -1;
+  const dir = wheelZoomAccum < 0 ? 1 : -1;
+  wheelZoomAccum = 0;
   settings.setGlobalZoom((settings.globalZoom || 1) + dir * 0.1);
 }
 
@@ -548,25 +619,66 @@ watchEffect(() => {
   setMarkdownAutoNumberHeadings(settings.markdownAutoNumberHeadings);
 });
 
+// #216 — curly-quote substitution is opt-in (same pattern as breaks above).
+watchEffect(() => {
+  setMarkdownSmartQuotes(settings.smartQuotes);
+});
+
 // #133 — the rendered preview previously ignored the editor `fontFamily`
 // setting (it was hardcoded to the UI font), so in split view the two panes
 // used different typefaces. Surface the chosen face — with the same CJK
 // fallback stack the editor uses — so Preview.vue / ReadingView render in it.
 watchEffect(() => {
-  document.documentElement.style.setProperty(
-    '--content-font-family',
-    buildEditorFontStack(settings.fontFamily),
-  );
+  const root = document.documentElement;
+  root.style.setProperty('--content-font-family', buildEditorFontStack(settings.fontFamily));
+  // Gitee IK9BBG — reading mode has its own serif stack, so it swallowed the
+  // font setting whole. `--content-font-family` can't be used as the override
+  // (it's always set, and would replace the serif look for everyone), so
+  // publish a second variable only when the user actually picked a face.
+  if (settings.fontFamily.trim()) {
+    root.style.setProperty('--content-font-user', buildEditorFontStack(settings.fontFamily));
+  } else {
+    root.style.removeProperty('--content-font-user');
+  }
 });
 
-// Sync native menu bar language
+// Sync native menu bar language — and, since #180, the accelerators too:
+// a rebound action must lose its old chord from the native menu, or macOS
+// keeps firing the original and the rebind only ever adds a second key.
 watchEffect(() => {
-  invoke('set_menu_language', { lang: settings.language }).catch(() => {});
+  // Spread rather than passing the reactive object straight through: reading
+  // it with `hasOwnProperty` (as nativeMenuAccelerators does) does not register
+  // a dependency on a key that does not exist yet, so the first rebind of an
+  // action never re-ran this effect and the native menu kept the old chord.
+  const overrides = { ...settings.keybindings };
+  invoke('set_menu_config', {
+    lang: settings.language,
+    accels: nativeMenuAccelerators(overrides),
+  }).catch(() => {});
   invoke('save_language_preference', { lang: settings.language }).catch(() => {});
 });
 
+// #282 — nearly every marketplace theme declares its palette for `:root`,
+// `:root[data-theme="light"]` and `:root[data-theme="dark"]` in one rule, and
+// custom-theme.ts injects it after the app bundle, so it wins in every slot:
+// the attribute below still flips and not one colour moves. The reporter hit
+// this from the toolbar's light/dark button, where there is no room for an
+// explanation, and concluded the theme switch was broken. Say it once, when
+// he acts — never on startup, where it would be a scold about a choice he
+// already made.
+let themeAppliedOnce = false;
 watchEffect(() => {
-  document.documentElement.setAttribute('data-theme', dataThemeFor(settings.theme));
+  document.documentElement.setAttribute('data-theme', dataThemeFor(settings.theme, !!settings.customCssPath));
+  const overriddenBy = settings.customCssPath;
+  if (!themeAppliedOnce) {
+    themeAppliedOnce = true;
+    return;
+  }
+  if (!overriddenBy) return;
+  const name = (overriddenBy.split(/[\\/]/).pop() || overriddenBy).replace(/\.css$/i, '');
+  void import('./stores/toasts').then(({ useToastsStore }) => {
+    useToastsStore().warning(t('settings.customThemeOverrides', { name }), 6000);
+  });
 });
 
 // v2.0: keep the Rust workspace index in sync with the active folder.
@@ -591,6 +703,25 @@ watchEffect(() => {
   // the "I 503 when no folder is open" contract, so they read from
   // independent state but get pushed together.
   invoke('rest_set_workspace', { folder: folder ?? null }).catch(() => {});
+});
+
+// Quick capture's hotkey is an OS-level registration owned by Rust, but the
+// setting that decides it lives in the frontend — so push it on start and on
+// every change. Passing null unregisters, which is what "off" has to mean for
+// a chord that would otherwise stay stolen from every other application.
+watchEffect(() => {
+  const accel = settings.quickCaptureEnabled ? settings.quickCaptureShortcut : null;
+  invoke('quick_capture_set_shortcut', { accelerator: accel })
+    .then(() => {
+      quickCaptureError.value = '';
+    })
+    .catch((e) => {
+      // Almost always "another app already owns this chord". Surfaced in
+      // Settings rather than as a toast: nothing is broken, and a modal
+      // complaint at every launch would be worse than the conflict.
+      quickCaptureError.value = String(e);
+      console.warn('[quickCapture] shortcut not registered', e);
+    });
 });
 
 // v2.3: keep the RAG index in sync with the toggle + active folder. When
@@ -646,13 +777,18 @@ window.addEventListener(
   },
 );
 
-// v2.0 F2: load Hunspell dict on demand. (Lang fixed at en_US in v2.0.)
-let spellcheckLoaded = false;
+// v2.0 F2: load the Hunspell dictionary on demand.
+// #246 — the language is no longer pinned to en_US. `spellcheckLang` drives
+// it, and changing it reloads, so a user who drops es_ES into
+// `<config>/dictionaries/` and picks it gets Spanish checking immediately
+// instead of every word flagged against an English dictionary.
+let spellcheckLoadedFor: string | null = null;
 watchEffect(async () => {
-  if (settings.spellcheckEnabled && !spellcheckLoaded) {
+  const lang = settings.spellcheckLang || 'en_US';
+  if (settings.spellcheckEnabled && spellcheckLoadedFor !== lang) {
     try {
-      await invoke('spellcheck_init', { lang: 'en_US' });
-      spellcheckLoaded = true;
+      await invoke('spellcheck_init', { lang });
+      spellcheckLoadedFor = lang;
     } catch (e) {
       console.warn('spellcheck_init failed', e);
     }
@@ -671,7 +807,7 @@ function onOpenHelpEvent() {
   helpOpen.value = true;
 }
 function onOpenSearchEvent() {
-  searchOpen.value = !searchOpen.value;
+  toggleGlobalSearch();
 }
 function onOpenCjkProofreadEvent() {
   cjkProofreadOpen.value = true;
@@ -690,7 +826,9 @@ function onFilterTag(tag: string) {
   } else {
     searchPrefill.value = newPrefill;
   }
-  searchOpen.value = true;
+  // #209 — same hidden-sidebar trap: clicking a tag has to un-hide the strip,
+  // otherwise the prefill lands in a pane nobody can see.
+  openGlobalSearchPane();
 }
 
 let unlistenOpened: UnlistenFn | null = null;
@@ -706,7 +844,7 @@ async function openExternalFile() {
   try {
     await openPath(filePath);
   } catch (e) {
-    console.warn('openExternal failed', e);
+    (await import('./stores/toasts')).useToastsStore().error(String(e));
   }
 }
 
@@ -724,6 +862,9 @@ function dispatchMenuAction(id: string) {
     case 'file.openFolder':
       files.openFolder();
       break;
+    case 'file.import':
+      void files.importDocuments();
+      break;
     case 'file.save':
       files.saveActive();
       break;
@@ -740,7 +881,19 @@ function dispatchMenuAction(id: string) {
       if (tabs.activeId) files.closeTabSafe(tabs.activeId);
       break;
     case 'window.new':
-      window.dispatchEvent(new CustomEvent('solomd:new-window'));
+      // #280 — this used to dispatch a `solomd:new-window` event that nothing
+      // listened for, so the menu item did nothing at all.
+      void openNewWindow().catch(async (e) => {
+        console.error('failed to create window', e);
+        const toasts = (await import('./stores/toasts')).useToastsStore();
+        toasts.warning(t('toast.newWindowFailed'));
+      });
+      break;
+    case 'file.exit':
+      // #221 — the Windows in-app menubar dropped the native menu's 退出 item.
+      // Routes through Tauri's close-requested flow → unsaved-tabs confirm,
+      // same as the caption ✕ button.
+      void getCurrentWindow().close();
       break;
     case 'view.toggleTheme':
       settings.toggleTheme();
@@ -789,7 +942,7 @@ function dispatchMenuAction(id: string) {
       settingsOpen.value = true;
       break;
     case 'search.global':
-      searchOpen.value = !searchOpen.value;
+      toggleGlobalSearch();
       break;
     case 'help.markdown':
       helpOpen.value = true;
@@ -797,9 +950,44 @@ function dispatchMenuAction(id: string) {
     case 'help.about':
       aboutOpen.value = true;
       break;
+    // Windows unified title bar — the in-app Edit menu (Toolbar.vue). The
+    // native menu used PredefinedMenuItems here; in-app we drive the focused
+    // editor directly. `execCommand` covers the Windows editors (plain
+    // textarea + contenteditable live blocks); the menubar buttons use
+    // `mousedown.prevent` so focus never leaves the editor. (CodeMirror —
+    // Vim mode on Windows — keeps its own keyboard-driven undo history.)
+    case 'edit.undo':
+      document.execCommand('undo');
+      break;
+    case 'edit.redo':
+      document.execCommand('redo');
+      break;
+    case 'edit.cut':
+      document.execCommand('cut');
+      break;
+    case 'edit.copy':
+      document.execCommand('copy');
+      break;
+    case 'edit.paste':
+      // execCommand('paste') is blocked in modern engines; read the clipboard
+      // through the Tauri plugin and insert as text at the selection.
+      void readClipboardText()
+        .then((text) => {
+          if (text) document.execCommand('insertText', false, text);
+        })
+        .catch(() => {});
+      break;
+    case 'edit.selectAll':
+      document.execCommand('selectAll');
+      break;
     default:
       console.warn('unknown menu action', id);
   }
+}
+
+function onDomMenuAction(e: Event) {
+  const id = (e as CustomEvent<string>).detail;
+  if (id) dispatchMenuAction(id);
 }
 
 // Window size + position are persisted by tauri-plugin-window-state on the
@@ -1083,6 +1271,9 @@ onMounted(async () => {
   } catch (err) {
     console.warn('menu listener not available', err);
   }
+  // Windows unified title bar: the in-app menubar (Toolbar.vue) dispatches
+  // the same action ids through a DOM event — no Tauri round-trip needed.
+  window.addEventListener('solomd:menu-action', onDomMenuAction);
 
   // Drag-drop file open
   try {
@@ -1182,12 +1373,17 @@ async function onWikiOpen(e: Event) {
   // active file's directory and open directly — the same logic Preview.vue
   // uses for rendered links. workspaceIndex.resolve() only matches bare
   // stems/titles, so it silently failed for these (the reported bug).
-  if (/[\\/]/.test(target) || target.startsWith('.')) {
+  // #278 — only `./x` and `../x` are relative paths. A bare folder component
+  // like [[folder/note]] is an Obsidian-style vault path, not a path relative
+  // to the current file, and is resolved by the index's path-suffix match.
+  if (/^\.\.?\//.test(target)) {
     const cur = tabs.activeTab?.filePath;
     if (cur) {
       const sep = Math.max(cur.lastIndexOf('/'), cur.lastIndexOf('\\'));
       const dir = sep >= 0 ? cur.slice(0, sep + 1) : '';
-      const cleaned = target.replace(/^\.\//, '');
+      // "./sub/foo.md" → "sub/foo.md"; "../notes/bar.md" is kept so the
+      // filesystem normalizes dir + "../…" itself.
+      const cleaned = target.startsWith('./') ? target.slice(2) : target;
       try {
         await files.openPath(dir + cleaned, { bypassNewWindow: true });
         return;
@@ -1201,6 +1397,24 @@ async function onWikiOpen(e: Event) {
   if (path) {
     await files.openPath(path, { bypassNewWindow: true });
   } else {
+    // #278 — the index can miss a folder-style target (a file created since
+    // the last scan, or a path the scanner normalized differently). Try it
+    // against the workspace root before giving up and creating a draft, so a
+    // link to an existing note never silently makes a second empty one.
+    if (target.includes('/') && workspace.currentFolder && !workspace.currentFolder.startsWith('saf:')) {
+      const base = workspace.currentFolder.replace(/\/$/, '');
+      const candidates = /\.md$/i.test(target)
+        ? [`${base}/${target}`]
+        : [`${base}/${target}.md`, `${base}/${target}`];
+      for (const cand of candidates) {
+        try {
+          await files.openPath(cand, { bypassNewWindow: true });
+          return;
+        } catch {
+          // try the next candidate
+        }
+      }
+    }
     // Unresolved: create a new tab with the wikilink target as filename.
     const fileName = /\.md$/i.test(target) ? target : `${target}.md`;
     const tab = tabs.newTab({ fileName, language: 'markdown' });
@@ -1260,6 +1474,7 @@ onBeforeUnmount(() => {
     unlistenMenu();
     unlistenMenu = null;
   }
+  window.removeEventListener('solomd:menu-action', onDomMenuAction);
   if (unlistenWindowDestroyed) {
     unlistenWindowDestroyed();
     unlistenWindowDestroyed = null;
@@ -1283,6 +1498,10 @@ const showRelationshipsPane = computed(
 );
 const showTagsPane = computed(
   () => settings.showTagsPanel && !!workspace.currentFolder,
+);
+// Workspace-scoped like Tags: the task list is the vault's, not the note's.
+const showTasksPane = computed(
+  () => settings.showTasksPanel && !!workspace.currentFolder,
 );
 // v4.6 F4 — Neighborhood relationship explorer. Markdown-only, needs a folder
 // (frontmatter wikilink groups are resolved against the workspace index).
@@ -1323,24 +1542,81 @@ const showAgentPane = computed(() => !IS_APP_STORE_BUILD && settings.showAgentPa
 // no setting persisted because users don't want search living in their
 // sidebar across launches.
 const showSearchPane = computed(() => searchOpen.value);
-const showRightSidebar = computed(() => {
-  // Master "hide" toggle wins over individual panes — preserves which panes
-  // the user had on while still letting them dismiss the whole strip with
-  // a single action (toolbar close button / ⌥⌘B / command palette).
-  if (settings.rightSidebarHidden) return false;
-  return (
+// #168 — phone shell: one flag drives the CSS and the behaviour.
+const { isNarrow } = useViewport();
+
+/**
+ * Whether any pane in the right strip could draw something right now,
+ * ignoring the master hide flag. Most panes need a workspace folder and
+ * Backlinks also needs a markdown tab, so on a fresh install with no folder
+ * open the two panes that are on by default can render nothing at all.
+ *
+ * The settings store reads this through `setRightSidebarRenderable` so that
+ * toggling the strip on always has a visible result. Deriving it a second
+ * time over there would be two sources of truth for the same rules — the
+ * shape of bug this is fixing.
+ */
+const rightSidebarHasRenderablePane = computed(
+  () =>
     showSearchPane.value ||
     showOutlinePane.value ||
     showBacklinksPane.value ||
     showRelationshipsPane.value ||
     showTagsPane.value ||
+    showTasksPane.value ||
     showNeighborhoodPane.value ||
     showTypesPane.value ||
     showHistoryPane.value ||
     showInspectorPane.value ||
-    showAgentPane.value
-  );
+    showAgentPane.value,
+);
+
+const showRightSidebar = computed(() => {
+  // Master "hide" toggle wins over individual panes — preserves which panes
+  // the user had on while still letting them dismiss the whole strip with
+  // a single action (toolbar close button / ⌥⌘B / command palette).
+  if (settings.rightSidebarHidden) return false;
+  return rightSidebarHasRenderablePane.value;
 });
+
+// Asked by settings.toggleRightSidebar() when it un-hides the strip: make
+// sure something in there can actually draw, and say whether it now can. The
+// Outline is the fallback because it is the only pane that needs no workspace
+// folder — which is why users found that opening it once made the toggle
+// button start working.
+setRightSidebarShell({
+  visible: () => showRightSidebar.value,
+  ensureRenderable: () => {
+    if (rightSidebarHasRenderablePane.value) return true;
+    const tab = tabs.activeTab;
+    if (tab && tab.language === 'markdown') {
+      tab.showOutline = true;
+      settings.showOutline = true;
+      return true;
+    }
+    return false;
+  },
+});
+
+/**
+ * #168 — which side pane, if any, is floating over the editor on a phone.
+ * Only one at a time: two 320px drawers on a 390px screen is the "everything
+ * crammed together" the report was about. The file tree wins because that's
+ * the one users open on purpose.
+ */
+const narrowDrawer = computed<'left' | 'right' | null>(() => {
+  if (!isNarrow.value) return null;
+  if (settings.showFileTree || settings.showViewsPanel) return 'left';
+  if (showRightSidebar.value) return 'right';
+  return null;
+});
+
+/** Tap outside a drawer to put the editor back. */
+function closeNarrowDrawer(): void {
+  if (settings.showFileTree) settings.toggleFileTree();
+  if (settings.showViewsPanel) settings.toggleViewsPanel();
+  if (showRightSidebar.value) settings.toggleRightSidebar();
+}
 
 // v4.0.2 — ordered list of currently-visible right-sidebar panes. Drives
 // the v-for that interleaves <RsSplitter> between adjacent panes (#6 / #52).
@@ -1350,19 +1626,20 @@ const visibleRsPanes = computed(() => {
   // v4.3.0 issue #57b — order driven by settings.rsPaneOrder so users can
   // drag-reorder. Unknown ids (newly-shipped future panes) get appended at
   // the end so a SoloMD update doesn't blow away an existing user layout.
-  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
+  const all: Record<'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent', boolean> = {
     search: showSearchPane.value,
     outline: showOutlinePane.value,
     backlinks: showBacklinksPane.value,
     relationships: showRelationshipsPane.value,
     tags: showTagsPane.value,
+    tasks: showTasksPane.value,
     neighborhood: showNeighborhoodPane.value,
     types: showTypesPane.value,
     history: showHistoryPane.value,
     inspector: showInspectorPane.value,
     agent: showAgentPane.value,
   };
-  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
+  const known = ['search', 'outline', 'backlinks', 'relationships', 'tags', 'tasks', 'neighborhood', 'types', 'history', 'inspector', 'agent'] as const;
   const ordered: string[] = [];
   for (const id of settings.rsPaneOrder || []) {
     if (id in all && !ordered.includes(id)) ordered.push(id);
@@ -1372,7 +1649,7 @@ const visibleRsPanes = computed(() => {
   }
   return ordered
     .filter((id) => all[id as keyof typeof all])
-    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
+    .map((id) => ({ id: id as 'search' | 'outline' | 'backlinks' | 'relationships' | 'tags' | 'tasks' | 'neighborhood' | 'types' | 'history' | 'inspector' | 'agent' }));
 });
 
 // #131 — sidebar pane reordering via the ⋮⋮ grip.
@@ -1435,9 +1712,30 @@ watch(visibleRsPanes, () => {
 // fall back to the CSS flex defaults (1× for read-only panes, 4× for
 // Agent so chat keeps room when no splitter has been touched).
 function paneStyle(id: string) {
-  const h = settings.rightSidebarPaneHeights[id];
+  const panes = visibleRsPanes.value;
+  // #294 — a pane's stored height outlives the stack it was measured in.
+  // Drag the splitter while Outline shares the sidebar with Backlinks, then
+  // close Backlinks, and Outline stays pinned to that old height with dead
+  // space under it — and no splitter left to drag, because splitters only
+  // exist *between* panes. A pane that owns the sidebar alone therefore
+  // ignores the stored height and fills it, which is also the default
+  // `.rs-pane-host { flex: 1 1 0 }` behaviour before any drag.
+  if (panes.length < 2) return {};
+  // A stack nobody has dragged keeps the stylesheet's proportional shares
+  // (Agent asks for 4×) — only once a height has actually been pinned does
+  // this take over the sizing.
+  const stored = settings.rightSidebarPaneHeights;
+  if (!panes.some((p) => (stored[p.id] ?? 0) > 0)) return {};
+  // Then the bottom pane absorbs whatever the panes above leave over, so the
+  // stack always reaches the bottom edge no matter how stale the stored
+  // heights are or how much the window has been resized since.
+  if (panes[panes.length - 1]?.id === id) return { flex: '1 1 auto', minHeight: '80px' };
+  const h = stored[id];
   if (h && h > 0) {
-    return { flex: `0 0 ${h}px`, height: `${h}px` };
+    // `0 1` rather than `0 0`: heights are stored in pixels, so a window that
+    // later got shorter must be able to squeeze them instead of pushing the
+    // last pane off the bottom.
+    return { flex: `0 1 ${h}px`, height: `${h}px`, minHeight: '80px' };
   }
   return {};
 }
@@ -1486,6 +1784,23 @@ const typeLensName = ref('');
 // v4.6 F5 — when a saved view is opened from the sidebar, the content area
 // swaps to ViewNoteList (mirrors the basesOpen pattern).
 const viewOpen = ref(false);
+/**
+ * #245 — only let a saved view displace the editor while there is actually a
+ * view to show.
+ *
+ * `ViewNoteList`'s entire template — including its ‹ back button — sits behind
+ * `v-if="view"`, and `view` is `savedViews.activeView`, which the store nulls
+ * out on reload whenever the active slug no longer exists on disk
+ * (savedViews.ts:123). Nothing told `viewOpen` about that, so the content area
+ * rendered ViewNoteList (nothing at all) while `TileRoot` stayed suppressed in
+ * the `v-else` branch: a blank pane with no way back, surviving every attempt
+ * to open a file. Files still opened — the toast fired and the status bar
+ * counted the lines — but nothing could draw them. Reported on Android, where
+ * a SAF-mounted workspace that can't read `.solomd/views/` hits it easily,
+ * though it is not Android-specific.
+ */
+const savedViewsStore = useSavedViewsStore();
+const viewPaneVisible = computed(() => viewOpen.value && !!savedViewsStore.activeView);
 const aiHasKey = ref(false);
 async function refreshAiHasKey() {
   if (!settings.aiEnabled) { aiHasKey.value = false; return; }
@@ -1503,7 +1818,13 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
   <div
     v-else
     class="app"
-    :class="{ 'app--reading': settings.viewMode === 'reading', 'app--mobile': isMobile() }"
+    :class="{
+      'app--reading': settings.viewMode === 'reading',
+      'app--mobile': isMobile(),
+      'app--narrow': isNarrow,
+      'app--drawer-left': narrowDrawer === 'left',
+      'app--drawer-right': narrowDrawer === 'right',
+    }"
   >
     <!--
       v2.4 reading mode swaps out the entire toolbar / sidebar / status-bar
@@ -1519,10 +1840,18 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
         @open-palette="paletteOpen = true"
         @open-settings="openSettingsAt()"
         @open-help="helpOpen = true"
-        @open-search="searchOpen = !searchOpen"
+        @open-search="toggleGlobalSearch()"
       />
       <TelemetryBanner />
       <div class="workspace">
+        <!-- #168 — on a phone the side panes float over the editor instead of
+             stealing its width; this catches the tap that dismisses them. -->
+        <div
+          v-if="narrowDrawer"
+          class="workspace__scrim"
+          aria-hidden="true"
+          @click="closeNarrowDrawer"
+        />
         <div v-if="settings.showFileTree || settings.showViewsPanel" class="left-stack">
           <FileTree v-if="settings.showFileTree" />
           <ViewsPanel v-if="settings.showViewsPanel" />
@@ -1556,13 +1885,17 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
                 :prefill="searchPrefill"
                 @close="searchOpen = false"
               />
-              <Outline v-if="p.id === 'outline'" :cursor-line="cursorLine" @goto="onOutlineGoto" />
+              <Outline v-if="p.id === 'outline'" :cursor-line="outlineLine" @goto="onOutlineGoto" />
               <BacklinksPanel v-if="p.id === 'backlinks'" @close="ctxToggle(() => settings.toggleBacklinks())" />
               <RelationshipsPanel v-if="p.id === 'relationships'" @close="ctxToggle(() => settings.toggleRelationships())" />
               <TagsPanel
                 v-if="p.id === 'tags'"
                 @close="ctxToggle(() => settings.toggleTagsPanel())"
                 @filter-tag="onFilterTag"
+              />
+              <TasksPanel
+                v-if="p.id === 'tasks'"
+                @close="ctxToggle(() => settings.toggleTasksPanel())"
               />
               <NeighborhoodPanel
                 v-if="p.id === 'neighborhood'"
@@ -1586,7 +1919,7 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
           <BasesView v-if="basesOpen" />
           <InboxView v-else-if="inboxViewOpen" />
           <TypeLensView v-else-if="typeLensOpen" :type-name="typeLensName" />
-          <ViewNoteList v-else-if="viewOpen" />
+          <ViewNoteList v-else-if="viewPaneVisible" />
           <TileRoot v-else :node="tiles.root" @cursor="onCursor" @selection="onSelection" />
         </div>
         <aside
@@ -1618,13 +1951,17 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
                 :prefill="searchPrefill"
                 @close="searchOpen = false"
               />
-              <Outline v-if="p.id === 'outline'" :cursor-line="cursorLine" @goto="onOutlineGoto" />
+              <Outline v-if="p.id === 'outline'" :cursor-line="outlineLine" @goto="onOutlineGoto" />
               <BacklinksPanel v-if="p.id === 'backlinks'" @close="ctxToggle(() => settings.toggleBacklinks())" />
               <RelationshipsPanel v-if="p.id === 'relationships'" @close="ctxToggle(() => settings.toggleRelationships())" />
               <TagsPanel
                 v-if="p.id === 'tags'"
                 @close="ctxToggle(() => settings.toggleTagsPanel())"
                 @filter-tag="onFilterTag"
+              />
+              <TasksPanel
+                v-if="p.id === 'tasks'"
+                @close="ctxToggle(() => settings.toggleTasksPanel())"
               />
               <NeighborhoodPanel
                 v-if="p.id === 'neighborhood'"
@@ -1646,6 +1983,24 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
         </aside>
       </div>
       <StatusBar :line="cursorLine" :col="cursorCol" :selection-text="selectionText" />
+      <!-- Grid editor for the table under the caret. The pane that found the
+           table supplies the write-back closure, so this stays pane-agnostic. -->
+      <TableEditor
+        v-if="tableEditor.session"
+        :source="tableEditor.session.source"
+        @apply="(md: string) => tableEditor.session?.apply(md)"
+        @close="closeTableEditor()"
+      />
+
+      <FormulaEditor
+        v-if="formulaEditor.session"
+        :latex="formulaEditor.session.latex"
+        :display="formulaEditor.session.display"
+        :labels="formulaEditor.session.labels"
+        @apply="(latex: string, display: boolean) => formulaEditor.session?.apply(latex, display)"
+        @close="closeFormulaEditor()"
+      />
+
       <!-- v4.3.0 PR #75 — right-click context menu for sidebar pane toggles. -->
       <Teleport to="body">
         <div
@@ -1673,6 +2028,10 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
           <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleTagsPanel() })">
             <span class="sidebar-ctx__check">{{ settings.showTagsPanel ? '✓' : '' }}</span>
             {{ t('rsPane.tags') }}
+          </label>
+          <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleTasksPanel() })">
+            <span class="sidebar-ctx__check">{{ settings.showTasksPanel ? '✓' : '' }}</span>
+            {{ t('rsPane.tasks') }}
           </label>
           <label class="sidebar-ctx__item" @click="ctxToggle(() => { settings.toggleNeighborhood() })">
             <span class="sidebar-ctx__check">{{ settings.showNeighborhood ? '✓' : '' }}</span>
@@ -1839,6 +2198,62 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
   min-height: 0;
   overflow: hidden;
 }
+/* ============================================================
+ * #168 — phone shell.
+ *
+ * The desktop shell is three columns in a row: file tree | editor |
+ * right sidebar. At 390 CSS px that leaves the editor a sliver, which is
+ * exactly the reported "所有 UI 都挤到一块了". On a narrow viewport the two
+ * side panes stop being columns and float over the editor as drawers, so
+ * the editor always has the full width and one tap puts it back.
+ *
+ * Keyed off `.app--narrow` (see composables/useViewport.ts) rather than a
+ * bare media query so the UA-detected phone case and the width case can't
+ * drift apart, and so the same layout is reachable on a desktop by making
+ * the window narrow — which is how it gets tested.
+ * ============================================================ */
+.app--narrow .workspace {
+  position: relative;
+}
+.app--narrow .left-stack,
+.app--narrow .side-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(86vw, 320px);
+  max-width: 86vw;
+  flex: none;
+  min-width: 0;
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.28);
+}
+.app--narrow .left-stack {
+  left: 0;
+}
+.app--narrow .side-sidebar--right {
+  right: 0;
+}
+.app--narrow .side-sidebar--left {
+  left: 0;
+}
+/* The drag-to-resize handles are a mouse affordance and a 8px touch trap. */
+.app--narrow .side-sidebar__resize {
+  display: none;
+}
+.workspace__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.32);
+  border: 0;
+  padding: 0;
+}
+/* The editor keeps the full width underneath the drawer. */
+.app--narrow .content {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
 /* v4.6 F5 — left column stacks the file tree above the Saved Views panel. */
 .left-stack {
   display: flex;
@@ -1851,14 +2266,10 @@ watchEffect(() => { void settings.aiEnabled; void settings.aiProvider; refreshAi
   min-height: 0;
   height: auto;
 }
-/* #148 (mobile) — on a phone the file tree takes the full width (the editor is
-   collapsed underneath while picking); opening a file hides the tree and the
-   editor gets the whole screen. Avoids the tree + editor squeezing each other
-   into unreadable slivers on a narrow viewport. */
-.app--mobile .left-stack {
-  flex: 1 1 100%;
-  width: 100%;
-}
+/* #148 (mobile) — the file tree used to go full-width on a phone so the tree
+   and the editor didn't squeeze each other into slivers. #168 replaces that
+   with the drawer above: same goal, but the editor stays visible underneath
+   and one tap outside returns to it, instead of the tree taking the screen. */
 .app--mobile .left-stack > :deep(.ftree) {
   width: 100%;
 }

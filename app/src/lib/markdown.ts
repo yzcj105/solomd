@@ -10,7 +10,10 @@ import footnote from 'markdown-it-footnote';
 import frontMatter from 'markdown-it-front-matter';
 // @ts-ignore — no types shipped
 import mark from 'markdown-it-mark';
+import cjkFriendly from 'markdown-it-cjk-friendly';
 import yaml from 'js-yaml';
+import { numberEquations } from './equations';
+import { sanitizeRenderedHtml } from './sanitize-html';
 
 // NOTE: `@hedgedoc/markdown-it-task-lists` is installed but unusable here —
 // its compiled ESM entry does `import Token from 'markdown-it/lib/token.js'`
@@ -20,6 +23,19 @@ import yaml from 'js-yaml';
 
 const katexPlugin: any = (katex as any).default ?? katex;
 
+// CJK-friendly emphasis (#262 / Gitee IKA1A0). `**限制：**硬链接` renders as
+// literal asterisks under stock CommonMark, and that shape is everywhere in
+// Chinese writing: a bold run ending in a full-width colon, immediately
+// followed by a Han character — no space, because CJK doesn't use one. The
+// closing `**` is preceded by punctuation and followed by a letter, so it
+// isn't right-flanking and can't close.
+//
+// `markdown-it-cjk-friendly` implements the CommonMark CJK amendment
+// (commonmark/commonmark-spec#650), which reads those clauses as *non-CJK*
+// punctuation. ASCII text keeps stock CommonMark behaviour — `**limit:**hard`
+// stays literal — because nothing CJK is adjacent.
+
+
 // Per-render front-matter capture. markdown-it is synchronous so a
 // module-level variable is safe for sequential calls, but this is NOT
 // concurrent-safe across interleaved renders.
@@ -27,10 +43,19 @@ let lastFrontMatterRaw: string | null = null;
 
 // `html: true` lets users embed inline HTML like
 // `<img src=… style="zoom:50%;">`, `<details>`, `<sub>`, or table HTML for
-// edge cases markdown can't express. CSP in tauri.conf.json is `null` for
-// the local webview, but this app only ever renders the user's own files
-// — no untrusted input — so the security tradeoff is the same as Typora /
-// Obsidian (both ship with HTML on by default). See issue #54.
+// edge cases markdown can't express (issue #54) — that stays on, because
+// breaking it would break real documents.
+//
+// #304 corrects the assumption the old comment made here ("this app only ever
+// renders the user's own files — no untrusted input"): notes travel. Shared
+// vaults, downloaded .md files, Git-synced folders and AI output all end up in
+// this renderer, and `html: true` means `<img src=x onerror=…>` in any of them
+// used to execute inside the webview — where `__TAURI_INTERNALS__.invoke`
+// exposes the app's own file-read/write commands. So `renderMarkdown()` now
+// runs its output through `sanitizeRenderedHtml()` (DOMPurify, configured in
+// ./sanitize-html.ts to keep KaTeX MathML, inline SVG, highlight.js spans and
+// our data-* plumbing), and tauri.conf.json carries a CSP that blocks inline
+// script even if the sanitizer is bypassed.
 export const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -69,7 +94,8 @@ export const md = new MarkdownIt({
   .use(anchor, { permalink: false, slugify: (s: string) => slugify(s) })
   .use(katexPlugin, { throwOnError: false })
   .use(footnote)
-  .use(mark);
+  .use(mark)
+  .use(cjkFriendly);
 
 // ---- Wikilink rule (`[[X]]`, `[[X|alias]]`, `[[X#heading]]`) ---------------
 // Used by F1 (v2.0). Renders into <a class="md-wikilink" data-wikilink-target="X">…</a>.
@@ -125,6 +151,35 @@ md.inline.ruler.before('link', 'wikilink', (state, silent) => {
   return false;
 });
 
+// ---- Image with a space in its path (#345) -----------------------------------
+// CommonMark doesn't allow a space in a bare link destination, so
+// `![](D:/Program Files/a.png)` renders as literal text. SoloMD used to write
+// exactly that when pasting into an image folder whose path had a space (it
+// now percent-encodes, see md-image-url.ts), so notes in the wild still carry
+// such links. Accept them as images — but only when the destination is a
+// single line, has no quotes, parentheses or angle brackets, and ends in an
+// image extension. Under the standard grammar that text can only ever render
+// as the raw characters, so nothing that works today changes meaning.
+const SPACED_IMAGE_RE =
+  /^!\[([^\]\n]*)\]\(\s*([^()<>"'\n]*?\s[^()<>"'\n]*?\.(?:png|jpe?g|gif|webp|svg|bmp|avif|ico|tiff?))\s*\)/i;
+md.inline.ruler.before('image', 'image_spaced_path', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x21 /* ! */) return false;
+  const m = SPACED_IMAGE_RE.exec(state.src.slice(state.pos, state.posMax));
+  if (!m) return false;
+  const href = state.md.normalizeLink(m[2]);
+  if (!state.md.validateLink(href)) return false;
+  if (!silent) {
+    const children: typeof state.tokens = [];
+    state.md.inline.parse(m[1], state.md, state.env, children);
+    const token = state.push('image', 'img', 0);
+    token.attrs = [['src', href], ['alt', '']];
+    token.children = children;
+    token.content = m[1];
+  }
+  state.pos += m[0].length;
+  return true;
+});
+
 // ---- Source line mapping for split-pane scroll sync ----
 // Annotate every block-level opening token with `data-source-line` set to
 // the 1-indexed source line. App.vue's split-scroll uses these attributes
@@ -173,12 +228,19 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
   return html.replace(/<code([^>]*)>([\s\S]*?)<\/code>/, (_m, codeAttrs, inner) => {
     // Strip the trailing newline if any so we don't render an empty
     // line-numbered row at the end.
-    const trimmed = inner.endsWith('\n') ? inner.slice(0, -1) : inner;
+    // The newline can sit *inside* a highlight span that runs to the end of
+    // the block ("…\n</span>"), so look past closing tags for it.
+    const trimmed = inner.replace(/\n((?:<\/span>)*)$/, '$1');
     const openSpans: string[] = [];
     let out = '';
     let line = '';
     const flush = () => {
-      out += `<span class="cb-line">${line || ' '}</span>`;
+      // #190 — a blank line inside a multi-line highlight span is not an empty
+      // string, it is `<span class="hljs-code"></span>`: no text, so no line
+      // box, and its number landed on top of the next one. Judge emptiness by
+      // the text, not the markup.
+      const blank = line.replace(/<[^>]*>/g, '') === '';
+      out += `<span class="cb-line">${blank ? `${line} ` : line}</span>`;
       line = '';
     };
     for (const tok of trimmed.match(/<span\b[^>]*>|<\/span>|\n|[^<\n]+|</g) ?? []) {
@@ -229,6 +291,164 @@ md.core.ruler.push('source_line_map', (state) => {
   }
 });
 
+// ---- Document table of contents (`[TOC]`) ---------------------------------
+// Expand a standalone, case-insensitive `[TOC]` paragraph at token level. Doing
+// this after markdown-it-anchor has assigned heading ids keeps the links and
+// duplicate-heading suffixes identical to the rendered headings. It also keeps
+// the original source line map intact; expanding the source text itself would
+// shift every heading after a large TOC and break split-pane scroll sync.
+const TOC_MARKER_RE = /^\[toc\]$/i;
+
+interface TocHeading {
+  level: number;
+  text: string;
+  id: string;
+}
+
+function tocHeadingText(inline: any): string {
+  const children = inline?.children ?? [];
+  let text = '';
+  for (const child of children) {
+    if (child.type === 'softbreak' || child.type === 'hardbreak') {
+      text += ' ';
+    } else if (child.type === 'html_inline') {
+      text += String(child.content || '').replace(/<[^>]*>/g, '');
+    } else if (
+      child.type === 'text' ||
+      child.type === 'code_inline' ||
+      child.type === 'math_inline' ||
+      child.type === 'image' ||
+      child.type === 'footnote_ref'
+    ) {
+      text += child.content || '';
+    }
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function tocHeadingsFromTokens(tokens: any[]): TocHeading[] {
+  const headings: TocHeading[] = [];
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const open = tokens[i];
+    const inline = tokens[i + 1];
+    if (open.type !== 'heading_open' || inline?.type !== 'inline') continue;
+    const level = Number.parseInt(String(open.tag || '').slice(1), 10);
+    if (!Number.isFinite(level) || level < 1 || level > 6) continue;
+    const text = tocHeadingText(inline) || inline.content.trim();
+    const id = open.attrGet('id') || slugify(inline.content);
+    if (text && id) headings.push({ level, text, id });
+  }
+  return headings;
+}
+
+function escapeTocLinkLabel(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+}
+
+function tocListMarkdown(headings: TocHeading[]): string {
+  const levelStack: number[] = [];
+  const lines: string[] = [];
+  for (const heading of headings) {
+    while (levelStack.length && levelStack[levelStack.length - 1] >= heading.level) {
+      levelStack.pop();
+    }
+    const depth = levelStack.length;
+    levelStack.push(heading.level);
+    lines.push(
+      `${'  '.repeat(depth)}- [${escapeTocLinkLabel(heading.text)}](#${heading.id})`,
+    );
+  }
+  return lines.join('\n');
+}
+
+function parseForToc(state: any, source: string): any[] {
+  // The front-matter plugin writes through a module-level capture used by the
+  // outer render. A nested parse for a live-edit fragment must not replace that
+  // capture with the full document's front matter.
+  const savedFrontMatter = lastFrontMatterRaw;
+  try {
+    return state.md.parse(source, { solomdTocScan: true });
+  } finally {
+    lastFrontMatterRaw = savedFrontMatter;
+  }
+}
+
+function tocListTokens(state: any, headings: TocHeading[]): any[] {
+  const tokens = parseForToc(state, tocListMarkdown(headings));
+  for (const token of tokens) {
+    // These maps describe the generated list, not the user's document. Leaving
+    // them attached would create bogus data-source-line values in the preview.
+    token.map = null;
+    const sourceLineAttr = token.attrIndex('data-source-line');
+    if (sourceLineAttr >= 0) token.attrs?.splice(sourceLineAttr, 1);
+    if (token.type === 'bullet_list_open') token.attrJoin('class', 'md-toc__list');
+    if (token.type === 'list_item_open') token.attrJoin('class', 'md-toc__item');
+    // Inline children are not present in the top-level token array; decorate
+    // their link_open tokens explicitly so TOC links can be styled in every
+    // renderer that consumes the shared markdown-it instance.
+    for (const child of token.children ?? []) {
+      if (child.type === 'link_open') child.attrJoin('class', 'md-toc__link');
+    }
+  }
+  return tokens;
+}
+
+md.core.ruler.before('source_line_map', 'table_of_contents', (state) => {
+  const env = (state.env || {}) as Record<string, unknown>;
+  if (env.solomdTocScan === true) return;
+
+  const sourceLines = state.src.split('\n');
+  const markers: number[] = [];
+  for (let i = 0; i < state.tokens.length - 2; i++) {
+    const open = state.tokens[i];
+    const inline = state.tokens[i + 1];
+    const close = state.tokens[i + 2];
+    if (
+      open.type !== 'paragraph_open' ||
+      inline?.type !== 'inline' ||
+      close?.type !== 'paragraph_close' ||
+      !TOC_MARKER_RE.test(inline.content.trim()) ||
+      !open.map ||
+      open.map[1] !== open.map[0] + 1 ||
+      !/^[ \t]*\[toc\][ \t]*\r?$/i.test(sourceLines[open.map[0]] ?? '')
+    ) {
+      continue;
+    }
+    markers.push(i);
+  }
+  if (!markers.length) return;
+
+  const externalSource = env.solomdTocSource;
+  const headingTokens =
+    typeof externalSource === 'string' ? parseForToc(state, externalSource) : state.tokens;
+  const headings = tocHeadingsFromTokens(headingTokens);
+
+  // Work backwards so splicing one marker never invalidates a later index.
+  for (let m = markers.length - 1; m >= 0; m--) {
+    const markerIndex = markers[m];
+    const marker = state.tokens[markerIndex];
+    if (!headings.length) {
+      state.tokens.splice(markerIndex, 3);
+      continue;
+    }
+    const navOpen = new state.Token('toc_open', 'nav', 1);
+    navOpen.block = true;
+    navOpen.map = marker.map;
+    navOpen.attrSet('class', 'md-toc');
+    navOpen.attrSet('aria-label', 'Table of contents');
+    navOpen.attrSet('data-source-line', String((marker.map?.[0] ?? 0) + 1));
+    const navClose = new state.Token('toc_close', 'nav', -1);
+    navClose.block = true;
+    state.tokens.splice(
+      markerIndex,
+      3,
+      navOpen,
+      ...tocListTokens(state, headings),
+      navClose,
+    );
+  }
+});
+
 // Raw HTML blocks render their content verbatim — attrJoin above never reaches
 // the output, so documents built around `<div>…<img>…</div>` containers had no
 // sync anchors at all and the split panes drifted apart across those regions
@@ -251,6 +471,33 @@ md.renderer.rules.html_block = function (tokens, idx, options, env, self) {
 //   3. attach `data-line="N"` (1-indexed source line) to the <li>
 // We also tag the enclosing <ul>/<ol> with `contains-task-list` so
 // integrators can strip bullet markers.
+// #271 — short table cells don't wrap. The browser's table layout promises a
+// column only its min-content width, which for Chinese is ONE character, so a
+// short label beside a long column was squeezed until it read top to bottom
+// ("定/时/任/务…"). A cell whose text is short — up to ~12 CJK characters or
+// ~24 Latin ones — is kept on one line; longer cells wrap as before, so a
+// wide table still fits its page.
+const SHORT_CELL_WIDTH = 24;
+function displayWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) w += /[\u2E80-\uA4CF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/.test(ch) ? 2 : 1;
+  return w;
+}
+md.core.ruler.after('inline', 'table_short_cells', (state) => {
+  const tokens = state.tokens;
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const tok = tokens[i];
+    if (tok.type !== 'td_open' && tok.type !== 'th_open') continue;
+    const inline = tokens[i + 1];
+    if (inline.type !== 'inline') continue;
+    // Measure what is shown, not the markup: `**x**` is one character wide.
+    const shown = (inline.children ?? [])
+      .map((c) => (c.type === 'text' || c.type === 'code_inline' ? c.content : ''))
+      .join('');
+    if (shown && displayWidth(shown) <= SHORT_CELL_WIDTH) tok.attrJoin('class', 'cell-nowrap');
+  }
+});
+
 md.core.ruler.after('inline', 'task_lists', (state) => {
   const tokens = state.tokens;
   const TASK_RE = /^\[([ xX])\][ \u00A0]/;
@@ -633,7 +880,13 @@ function normalizeListIndent(source: string): string {
   };
   const lines = source.split('\n');
   const out: string[] = [];
-  const stack: { orig: number; norm: number }[] = [];
+  // #213 — track each level's `markerWidth` (marker glyph + trailing spaces)
+  // so a nested item re-indents under its PARENT's content column instead of a
+  // fixed 2-space step. Ordered markers are 3+ chars wide (`1. `, `10. `), and
+  // CommonMark only nests a child when it's indented by at least the parent
+  // marker width — the old flat +2 left ordered sublists under-indented, so
+  // markdown-it flattened them into siblings.
+  const stack: { orig: number; norm: number; markerWidth: number }[] = [];
   let inFence = false;
   let fenceChar = '';
   let curDelta = 0;
@@ -662,18 +915,24 @@ function normalizeListIndent(source: string): string {
     const m = markRe.exec(line);
     if (m) {
       const orig = expand(m[1]);
+      // Content column = marker glyph + its trailing spaces. A child list must
+      // clear this to nest (CommonMark), so we re-indent children to exactly it.
+      const markerWidth = m[2].length + m[3].length;
       while (stack.length && orig < stack[stack.length - 1].orig) stack.pop();
       const top = stack[stack.length - 1];
       let norm: number;
       if (top && orig === top.orig) {
         norm = top.norm;
+        // Siblings can differ in marker width (`9.` → `10.`); keep this item's
+        // width for ITS children.
+        top.markerWidth = markerWidth;
       } else if (top && orig > top.orig) {
-        norm = top.norm + 2;
-        stack.push({ orig, norm });
+        norm = top.norm + top.markerWidth;
+        stack.push({ orig, norm, markerWidth });
       } else {
         norm = 0;
         stack.length = 0;
-        stack.push({ orig, norm });
+        stack.push({ orig, norm, markerWidth });
       }
       curDelta = norm - orig;
       curOrig = orig;
@@ -700,6 +959,21 @@ function normalizeListIndent(source: string): string {
  *  editor all share the `md` singleton). Called by the settings store sync. */
 export function setMarkdownHardBreaks(on: boolean): void {
   md.set({ breaks: on });
+}
+
+// #216 — `typographer: true` also enables markdown-it's `smartquotes` rule,
+// which rewrites straight quotes to curly ones (' → U+2019). Fonts that
+// resolve U+2019 through a CJK fallback draw it fullwidth, so "test's"
+// renders as "test'　s" — reported as "extra space after the apostrophe",
+// and the preview stops matching the typed source. Curly quotes are opt-in
+// now (settings.smartQuotes); the rest of typographer ((c) → ©, --- → —,
+// ellipsis) is unaffected.
+md.disable('smartquotes');
+
+/** #216 — toggle curly-quote substitution; synced from the settings store. */
+export function setMarkdownSmartQuotes(on: boolean): void {
+  if (on) md.enable('smartquotes');
+  else md.disable('smartquotes');
 }
 
 // ---- Numbered-section auto-headings (opt-in setting) ----------------------
@@ -772,26 +1046,40 @@ function numberedSectionHeadings(source: string): string {
 export function preprocessMarkdown(source: string): string {
   let s = normalizeTableDelimiters(unwrapInlineHtmlBlocks(source || ''));
   if (autoNumberHeadings) s = numberedSectionHeadings(s);
+  // `\label` / `\eqref` are LaTeX that KaTeX does not implement — resolve
+  // them to `\tag` + anchors + links here so preview, PDF, Word and image
+  // export all number equations the same way, from one place.
+  s = numberEquations(s).text;
   return normalizeListIndent(s);
 }
 
-export function renderMarkdown(source: string, options?: { breaks?: boolean }): string {
+export function renderMarkdown(
+  source: string,
+  options?: { breaks?: boolean; tocSource?: string },
+): string {
   lastFrontMatterRaw = null;
   const normalized = preprocessMarkdown(source);
+  const env: Record<string, unknown> = {};
+  if (options?.tocSource !== undefined) {
+    env.solomdTocSource = preprocessMarkdown(options.tocSource);
+  }
   const prevBreaks = md.options.breaks;
   if (options?.breaks !== undefined) md.set({ breaks: options.breaks });
   let body = '';
   try {
-    body = md.render(normalized);
+    body = md.render(normalized, env);
   } finally {
     if (options?.breaks !== undefined) md.set({ breaks: prevBreaks });
   }
   if (lastFrontMatterRaw !== null) {
     const fmHtml = renderFrontMatterHtml(lastFrontMatterRaw);
     lastFrontMatterRaw = null;
-    return fmHtml + body;
+    body = fmHtml + body;
   }
-  return body;
+  // #304 — single choke point. Every consumer of rendered markdown (preview,
+  // the live-block editor, slideshow, PDF/image/HTML export) goes through
+  // here, so sanitizing the return value covers all of them at once.
+  return sanitizeRenderedHtml(body);
 }
 
 /**

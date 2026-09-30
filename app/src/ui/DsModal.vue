@@ -74,7 +74,11 @@ watch(
       lastFocused = document.activeElement as HTMLElement;
       document.addEventListener('keydown', onKeydown, true);
       await nextTick();
-      (focusables()[0] ?? panelRef.value)?.focus();
+      // A dialog can name its default control with `data-autofocus` (e.g. the
+      // Save button in UnsavedDialog, #357); otherwise the first focusable —
+      // which is the header × button — gets focus.
+      const preferred = panelRef.value?.querySelector<HTMLElement>('[data-autofocus]');
+      (preferred ?? focusables()[0] ?? panelRef.value)?.focus();
     } else {
       document.removeEventListener('keydown', onKeydown, true);
       lastFocused?.focus?.();

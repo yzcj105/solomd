@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { DsModal } from '../ui';
 import BrandMark from './BrandMark.vue';
 
-defineProps<{ open: boolean }>();
+const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const VERSION = ref('…');
@@ -16,6 +16,28 @@ onMounted(async () => {
     VERSION.value = '2.5.0';
   }
 });
+
+// Sponsor nicknames, fetched from the site so a new name shows up without an
+// app release. Silent on failure (offline, blocked): the section just stays
+// hidden. Fetched once per session, only when the dialog is first opened.
+const sponsors = ref<string[]>([]);
+let sponsorsLoaded = false;
+async function loadSponsors() {
+  if (sponsorsLoaded) return;
+  sponsorsLoaded = true;
+  try {
+    const res = await fetch('https://solomd.app/sponsors.json', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    sponsors.value = (data?.sponsors ?? [])
+      .map((s: { name?: unknown }) => (typeof s?.name === 'string' ? s.name.trim() : ''))
+      .filter((n: string) => n.length > 0 && n.length <= 40)
+      .slice(0, 200);
+  } catch {
+    /* offline or blocked — nothing to show */
+  }
+}
+watch(() => props.open, (o) => { if (o) loadSponsors(); }, { immediate: true });
 
 const links = {
   website: 'https://solomd.app',
@@ -96,6 +118,11 @@ async function visit(url: string) {
             <div class="about__link-url">GitHub · Alipay · WeChat</div>
           </div>
         </button>
+      </div>
+
+      <div v-if="sponsors.length" class="about__sponsors">
+        <div class="about__sponsors-title">Thanks to our sponsors / 感谢赞助者</div>
+        <div class="about__sponsors-names">{{ sponsors.join(' · ') }}</div>
       </div>
 
       <div class="about__footer">
@@ -195,6 +222,18 @@ async function visit(url: string) {
   margin-top: 1px;
 }
 
+.about__sponsors {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.about__sponsors-title {
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.about__sponsors-names {
+  color: var(--text-muted);
+}
 .about__footer {
   font-size: 10px;
   color: var(--text-faint);

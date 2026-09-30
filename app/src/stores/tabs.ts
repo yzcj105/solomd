@@ -202,10 +202,19 @@ export const useTabsStore = defineStore('tabs', {
       language: Language;
       hadBom: boolean;
     }) {
-      // If already open, just focus.
       const existing = this.tabs.find((t) => t.filePath === payload.filePath);
       if (existing) {
         this.activeId = existing.id;
+        // #317 — and adopt what the caller just read off disk. Opening a file
+        // that is already open used to only focus the tab and throw the fresh
+        // read away, so a document another editor had changed kept showing the
+        // stale copy with no way to refresh it from inside the app — opening
+        // it again, the obvious move, did nothing. Unsaved edits are never
+        // discarded: a dirty tab keeps its text and the watcher's conflict
+        // dialog owns that case.
+        if (existing.content === existing.savedContent) {
+          this.applyDiskRead(existing.id, payload);
+        }
         return existing;
       }
       const fileName = payload.filePath.split(/[\\/]/).pop() ?? 'Untitled';
@@ -236,6 +245,28 @@ export const useTabsStore = defineStore('tabs', {
       this.tabs.push(tab);
       this.activeId = tab.id;
       return tab;
+    },
+    /** #317 — apply a fresh read of the file to an open tab. The tab ends up
+     *  clean, because what it shows is exactly what the file holds. Line
+     *  endings are normalized the way `openFromDisk` does, or the tab would
+     *  read as dirty the moment the editor touched it. Returns whether
+     *  anything actually changed. */
+    applyDiskRead(
+      id: string,
+      payload: { content: string; encoding: string; hadBom: boolean },
+    ): boolean {
+      const t = this.tabs.find((x) => x.id === id);
+      if (!t) return false;
+      const lineEnding: 'lf' | 'crlf' = payload.content.includes('\r\n') ? 'crlf' : 'lf';
+      const normalized =
+        lineEnding === 'crlf' ? payload.content.replace(/\r\n/g, '\n') : payload.content;
+      const changed = t.content !== normalized || t.savedContent !== normalized;
+      t.content = normalized;
+      t.savedContent = normalized;
+      t.encoding = payload.encoding;
+      t.hadBom = payload.hadBom;
+      t.lineEnding = lineEnding;
+      return changed;
     },
     setContent(id: string, content: string) {
       const t = this.tabs.find((x) => x.id === id);

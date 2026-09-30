@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { revealInFileManager } from '../lib/reveal-in-file-manager';
 import { useTabsStore } from '../stores/tabs';
+import { useToastsStore } from '../stores/toasts';
 import { useTilesStore } from '../stores/tiles';
 import { useSettingsStore } from '../stores/settings';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useFiles } from '../composables/useFiles';
+import { requestRevealInTree } from '../composables/useFileTreeReveal';
+import { shortcutLabel } from '../lib/keybindings';
+import { isMacOS } from '../lib/platform';
 import { useI18n } from '../i18n';
 import type { SplitDirection } from '../types';
 
@@ -20,8 +24,20 @@ const settings = useSettingsStore();
 const workspace = useWorkspaceStore();
 const files = useFiles();
 const { t } = useI18n();
+const macChord = isMacOS();
+/** "New tab (Ctrl+N)" — the chord is read at render time so a rebind in
+ *  Settings shows up here (same reason CommandPalette does it). */
+const newTabChord = shortcutLabel('file.new', settings.keybindings, macChord);
 
 const tabsEl = ref<HTMLElement | null>(null);
+
+// #263 / #306 — dragging a tab onto the editor splits it, and the new pane
+// had no visible way to close: closing its tab just refills the pane with
+// another one, and "Close Pane" lived only in the command palette. The layout
+// is also restored on the next launch, so people were left with panes they
+// could not get rid of even across reinstalls. Every pane gets a close button
+// while there is more than one.
+const canClosePane = computed(() => tiles.allLeaves.length > 1);
 
 // When the active tab changes (e.g., opening a new file that creates a tab
 // off-screen in a crowded tabbar), scroll it into view so the user sees
@@ -95,17 +111,28 @@ async function onTabAction(action: 'close' | 'closeLeft' | 'closeRight' | 'close
   if (action === 'revealInFolder') {
     const path = list[idx]?.filePath;
     if (!path) return;
-    try { await revealItemInDir(path); } catch (e) { console.warn('reveal failed', e); }
+    try { await revealInFileManager(path); } catch (e) { useToastsStore().error(`${e}`); }
     return;
   }
   if (action === 'revealInFileTree') {
     const path = list[idx]?.filePath;
     if (!path) return;
-    const parent = path.replace(/[\\/][^\\/]+$/, '');
-    if (parent && parent !== path) {
-      if (!settings.showFileTree) settings.toggleFileTree();
-      workspace.setFolder(parent);
+    if (!settings.showFileTree) settings.toggleFileTree();
+    // Revealing is a view action, so the workspace is left alone when the file
+    // is already inside it — re-rooting the tree at the file's folder (what
+    // this used to do) moved the user's workspace, churned the recent-folder
+    // list, and looked like a no-op whenever the file sat directly in the root.
+    // Only a file from outside the workspace needs the tree to follow it;
+    // otherwise there would be nothing to point at.
+    const root = workspace.currentFolder;
+    const sep = path.includes('\\') ? '\\' : '/';
+    const inside =
+      !!root && (path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
+    if (!inside) {
+      const parent = path.replace(/[\\/][^\\/]+$/, '');
+      if (parent && parent !== path) workspace.setFolder(parent);
     }
+    requestRevealInTree(path);
     return;
   }
   const ids = (() => {
@@ -225,6 +252,43 @@ function onPointerUp(e: PointerEvent) {
   tiles.endTabDrag();
 }
 
+// ---- #218 — every open tab one click away ----
+// With many files open the strip overflows. It scrolls (wheel, middle-drag;
+// #106), but its scrollbar is hidden, so nothing says so — "根本没办法切换，
+// 显示不全". While the strip overflows, a "⌄" button lists every open tab.
+const tabsOverflow = ref(false);
+function measureTabsOverflow() {
+  const el = tabsEl.value;
+  tabsOverflow.value = !!el && el.scrollWidth > el.clientWidth + 1;
+}
+let tabsRO: ResizeObserver | null = null;
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && tabsEl.value) {
+    tabsRO = new ResizeObserver(measureTabsOverflow);
+    tabsRO.observe(tabsEl.value);
+  }
+  measureTabsOverflow();
+});
+onBeforeUnmount(() => tabsRO?.disconnect());
+watch(
+  () => tabs.tabs.map((x) => x.fileName).join('\u0000'),
+  () => nextTick(measureTabsOverflow),
+);
+
+const tabListPos = ref<{ top: number; right: number } | null>(null);
+function toggleTabList(e: MouseEvent) {
+  if (tabListPos.value) {
+    tabListPos.value = null;
+    return;
+  }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  tabListPos.value = { top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) };
+}
+function pickFromTabList(tabId: string) {
+  tabListPos.value = null;
+  tiles.setActiveTab(props.paneId, tabId);
+}
+
 function onTabClick(tabId: string) {
   // Swallow the click that immediately follows a drag-drop.
   if (suppressClick) {
@@ -280,12 +344,12 @@ function onMiddleUp() {
   middleDragging = false;
 }
 
-// Close context menu on click outside
+// Close context menu (and the #218 tab list) on click outside
 function onDocClick() {
   if (ctxMenu.value) closeCtxMenu();
+  if (tabListPos.value) tabListPos.value = null;
 }
 
-import { onMounted, onBeforeUnmount } from 'vue';
 onMounted(() => document.addEventListener('click', onDocClick));
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick);
@@ -299,35 +363,87 @@ onBeforeUnmount(() => {
 <template>
   <div class="pane-tabbar">
     <div class="tabs" ref="tabsEl" @wheel.prevent="onTabsWheel">
+      <!-- The loop variable is `tab`, not `t`: `t` is the i18n function in
+           this component, and `v-for="t in …"` silently shadowed it — any
+           `t('key')` written inside the row would have called the tab. -->
       <div
-        v-for="t in tabs.tabs"
-        :key="t.id"
-        :data-tab-id="t.id"
+        v-for="tab in tabs.tabs"
+        :key="tab.id"
+        :data-tab-id="tab.id"
         class="tab"
-        :class="{ 'tab--active': t.id === activeTabId, 'tab--dragging': tiles.dragTabId === t.id }"
-        @click="onTabClick(t.id)"
-        @pointerdown="onTabPointerDown($event, t.id)"
-        @mousedown.middle="onMiddlePointerDown($event, t.id)"
-        @contextmenu="onContextMenu($event, t.id)"
-        :title="t.filePath || t.fileName"
+        :class="{ 'tab--active': tab.id === activeTabId, 'tab--dragging': tiles.dragTabId === tab.id }"
+        @click="onTabClick(tab.id)"
+        @pointerdown="onTabPointerDown($event, tab.id)"
+        @mousedown.middle="onMiddlePointerDown($event, tab.id)"
+        @contextmenu="onContextMenu($event, tab.id)"
+        :title="tab.filePath || tab.fileName"
       >
-        <span class="tab__name">{{ t.fileName }}</span>
+        <span class="tab__name">{{ tab.fileName }}</span>
         <button
-          v-if="t.language === 'markdown'"
+          v-if="tab.language === 'markdown'"
           class="tab__outline"
-          :class="{ 'tab__outline--active': t.showOutline }"
-          :title="t.showOutline ? 'Hide outline' : 'Show outline'"
-          @click.stop="tabs.toggleOutline(t.id)"
+          :class="{ 'tab__outline--active': tab.showOutline }"
+          :title="tab.showOutline ? t('tabMenu.hideOutline') : t('tabMenu.showOutline')"
+          @click.stop="tabs.toggleOutline(tab.id)"
         >≡</button>
-        <span class="tab__dot" v-if="tabs.isDirty(t.id)">●</span>
+        <span class="tab__dot" v-if="tabs.isDirty(tab.id)">●</span>
         <button
           class="tab__close"
-          @click.stop="files.closeTabSafe(t.id)"
-          aria-label="Close tab"
+          @click.stop="files.closeTabSafe(tab.id)"
+          :aria-label="t('tabMenu.close')"
         >×</button>
       </div>
     </div>
-    <button class="tabbar__new" @click="files.newFile" title="New tab (Ctrl+N)">+</button>
+    <button
+      v-if="tabsOverflow"
+      class="tabbar__list"
+      :class="{ 'tabbar__list--open': tabListPos }"
+      :title="t('tabMenu.allTabs')"
+      :aria-label="t('tabMenu.allTabs')"
+      :aria-expanded="!!tabListPos"
+      @click.stop="toggleTabList"
+    >⌄</button>
+    <button class="tabbar__new" @click="files.newFile" :title="newTabChord ? `${t('tabMenu.newTab')} (${newTabChord})` : t('tabMenu.newTab')">+</button>
+    <button
+      v-if="canClosePane"
+      class="tabbar__close-pane"
+      :title="t('cmd.tile.closePane')"
+      :aria-label="t('cmd.tile.closePane')"
+      @click.stop="tiles.closePane(paneId)"
+    >
+      <!-- A pane with an × through it — a tab's own × is right next to it
+           and closes the document, which is not what this does. `.stop`:
+           the pane's own click handler would otherwise re-focus the pane that
+           was just closed. -->
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+      </svg>
+    </button>
+
+    <!-- #218 — all open tabs -->
+    <Teleport to="body">
+      <div
+        v-if="tabListPos"
+        class="ctx-menu tablist"
+        role="menu"
+        :style="{ top: tabListPos.top + 'px', right: tabListPos.right + 'px' }"
+        @click.stop
+      >
+        <button
+          v-for="tl in tabs.tabs"
+          :key="tl.id"
+          class="ctx-item tablist__item"
+          :class="{ 'tablist__item--active': tl.id === activeTabId }"
+          role="menuitem"
+          :title="tl.filePath || tl.fileName"
+          @click="pickFromTabList(tl.id)"
+        >
+          <span class="tablist__name">{{ tl.fileName }}</span>
+          <span v-if="tabs.isDirty(tl.id)" class="tablist__dot">●</span>
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Context menu -->
     <Teleport to="body">
@@ -349,10 +465,10 @@ onBeforeUnmount(() => {
         <button class="ctx-item" :disabled="!ctxFlags?.hasFilePath" @click="onTabAction('revealInFolder')">{{ t('tabMenu.revealInFolder') }}</button>
         <button class="ctx-item" :disabled="!ctxFlags?.hasFilePath" @click="onTabAction('revealInFileTree')">{{ t('tabMenu.revealInFileTree') }}</button>
         <div class="ctx-sep" />
-        <button class="ctx-item" @click="splitPane('horizontal')">Split Right</button>
-        <button class="ctx-item" @click="splitPane('vertical')">Split Down</button>
+        <button class="ctx-item" @click="splitPane('horizontal')">{{ t('cmd.tile.splitRight') }}</button>
+        <button class="ctx-item" @click="splitPane('vertical')">{{ t('cmd.tile.splitDown') }}</button>
         <div class="ctx-sep" v-if="tiles.allLeaves.length > 1" />
-        <button class="ctx-item" v-if="tiles.allLeaves.length > 1" @click="closePane">Close Pane</button>
+        <button class="ctx-item" v-if="tiles.allLeaves.length > 1" @click="closePane">{{ t('cmd.tile.closePane') }}</button>
       </div>
     </Teleport>
   </div>
@@ -471,6 +587,54 @@ onBeforeUnmount(() => {
   padding: 0;
   font-size: 16px;
   color: var(--text-muted);
+}
+.tabbar__list {
+  width: 28px;
+  padding: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.tabbar__list:hover,
+.tabbar__list--open {
+  color: var(--text);
+}
+.tablist {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  min-width: 220px;
+  max-width: 420px;
+}
+.tablist__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tablist__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.tablist__item--active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tablist__dot {
+  color: var(--accent);
+  font-size: 9px;
+}
+.tabbar__close-pane {
+  width: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.tabbar__close-pane:hover {
+  color: var(--text);
 }
 .ctx-menu {
   position: fixed;

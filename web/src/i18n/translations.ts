@@ -26,7 +26,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · just shipped · MIT · 5 platforms',
+      badge: 'v4.14.4 · just shipped · MIT · 5 platforms',
       title1: 'Everything Typora does.',
       title2: 'Free.',
       subtagline: 'Live WYSIWYG preview, tabs, themes, PDF / Word export — plus AI rewrite, folder sync, and native iOS & Android apps. MIT-licensed. No account, no subscription, no ads.',
@@ -41,7 +41,6 @@ export const t = {
       ctaWhatsNew: "What's new in v4 →",
       chips: ['📝 Live preview', '🔗 Wiki links', '🤖 BYOK AI', '🔍 Local RAG', '🎨 Themes', '📱 Cross-platform'],
       demoAlt: 'SoloMD v4 — Agent Panel + Recipe history + Trace view',
-      androidBeta: '🤖 Android beta is recruiting testers — join the test group',
     },
     features: {
       heading1: 'A folder of markdown.',
@@ -87,18 +86,22 @@ export const t = {
     download: {
       heading: 'Download SoloMD',
       lead: 'Free and open source. MIT license. No account needed.',
+      stores: { heading: "Or install from an app store", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android phones & tablets", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Package managers", note: "Updates arrive with your normal package upgrades." },
+      mirror: "Faster from mainland China: Gitee mirror →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · Notarized', primary: 'Download .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win on Apple Silicon', primary: 'Download .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi', store: 'Or get it from the Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win on Apple Silicon', primary: 'Download .msi', store: 'Or get it from the Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Download .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM servers', primary: 'Download .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Download universal .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Download universal .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Drag SoloMD.app to /Applications. Notarized — no Gatekeeper warning.',
         windows: 'First launch may show "Windows protected your PC" → click More info → Run anyway (one-time, until reputation builds).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage for the AppImage.',
+        verify: 'Chrome Enhanced Protection scans each new release and reports \"No viruses detected\" — that is a pass, not a warning. Every release ships a SHA256SUMS.txt if you want to verify the file yourself.',
       },
       allReleases: 'Looking for older versions?',
       allReleasesLink: 'All releases →',
@@ -164,7 +167,7 @@ export const t = {
         },
         {
           q: 'Does SoloMD work on Android and iOS?',
-          a: 'Yes. SoloMD 4.11.9 ships native Android (API 24+, ARM64 + ARMv7 + x86_64) and iOS (15+) builds. Android is available as sideload .apk on GitHub Releases and via the Google Play beta (join the group groups.google.com/g/solomd-android-testers, then opt in at play.google.com/apps/testing/app.solomd). iOS is on the App Store. Both mobile builds support live preview, Wiki links, AI rewrite, and folder-based sync via iCloud / Files / SD card.',
+          a: 'Yes. SoloMD 4.14.4 ships native Android (API 24+, ARM64 + ARMv7 + x86_64) and iOS (15+) builds. Android is on Google Play (play.google.com/store/apps/details?id=app.solomd) and as a sideload .apk on GitHub Releases. iOS and iPadOS are on the App Store (apps.apple.com/app/id6762498874). Both mobile builds support live preview, Wiki links, AI rewrite, and folder-based sync via iCloud / Files / SD card.',
         },
         {
           q: 'Does SoloMD work offline?',
@@ -218,6 +221,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Support SoloMD',
+      thanksHeading: "Thank you to our sponsors",
       lead: 'SoloMD is built and maintained by one developer in their free time. If it helps your writing, consider sponsoring — even a tiny amount keeps the project alive.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'For international sponsors. Monthly or one-time, processed by Stripe.',
@@ -273,6 +277,12 @@ export const t = {
           ],
         },
       ],
+    },
+    builtByClaude: {
+      heading: 'Built and maintained by Claude',
+      body: 'SoloMD is written, tested and released almost entirely by Claude Code, Anthropic\'s coding agent, working under a human maintainer who sets the direction and decides what ships. Issues and pull requests are triaged and answered by Claude too — the replies you get are written by an AI, not typed by a person.',
+      note: 'We say so because you should know what you are trusting with your notes, and because a reply can be confidently wrong. When one is, say so in the thread — that correction is the mechanism.',
+      cta: 'Read the code',
     },
     principles: {
       heading: 'Built different — on purpose',
@@ -375,7 +385,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · 正式发布 · MIT 协议 · 5 大平台',
+      badge: 'v4.14.4 · 正式发布 · MIT 协议 · 5 大平台',
       title1: 'Typora 能做的，它全能做。',
       title2: '免费。',
       subtagline: '所见即所得实时预览、多标签、主题、PDF / Word 导出 —— 还有 AI 改写、文件夹同步、原生 iOS 与 Android 应用。MIT 开源，无账号、无订阅、无广告。',
@@ -390,7 +400,6 @@ export const t = {
       ctaWhatsNew: 'v4 新功能 →',
       chips: ['📝 实时预览', '🔗 Wiki 链接', '🤖 BYOK AI', '🔍 本地 RAG', '🎨 主题', '📱 跨平台'],
       demoAlt: 'SoloMD v4 演示 — Agent 面板 + Recipe 历史 + Trace 视图',
-      androidBeta: '🤖 安卓测试招募中 —— 点击加入测试群组',
     },
     features: {
       heading1: '一个 Markdown 文件夹,',
@@ -436,18 +445,22 @@ export const t = {
     download: {
       heading: '下载 SoloMD',
       lead: '完全免费开源。MIT 协议。无需注册任何账号。',
+      stores: { heading: "也可以从应用商店安装", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "安卓手机和平板", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "包管理器", note: "随日常的软件包升级一起更新。" },
+      mirror: "国内下载更快：Gitee 镜像 →",
       platforms: {
         macos: { name: 'macOS', note: '通用版 · Apple Silicon + Intel · 已 Notarize', primary: '下载 .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '下载 .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · 骁龙 X · Copilot+ PC · Apple Silicon 上跑 Win', primary: '下载 .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '下载 .msi', store: '或从 Microsoft Store 安装' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · 骁龙 X · Copilot+ PC · Apple Silicon 上跑 Win', primary: '下载 .msi', store: '或从 Microsoft Store 安装' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '下载 .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · 树莓派 4/5 · ARM 服务器', primary: '下载 .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play 商店', primary: '下载通用 .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play 商店', primary: '下载通用 .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: '将 SoloMD.app 拖入 /Applications。已 notarized,无任何安全警告。',
         windows: '首次运行可能显示 "Windows 已保护你的电脑" → 点击 "更多信息" → "仍要运行" 即可。只此一次。',
         linux: 'AppImage 需先 chmod +x 然后直接运行;deb / rpm 用对应包管理器安装。',
+        verify: 'Chrome「增强保护」会扫描每个新版本并提示\"未检测到病毒\"—— 这是通过，不是警告。每个版本都附带 SHA256SUMS.txt，可自行校验。',
       },
       allReleases: '想找历史版本?',
       allReleasesLink: '所有版本 →',
@@ -513,7 +526,7 @@ export const t = {
         },
         {
           q: 'SoloMD 支持 Android 和 iOS 吗？',
-          a: '支持。SoloMD 4.11.9 提供原生 Android(API 24+,ARM64 + ARMv7 + x86_64)和 iOS(15+)版本。Android 可在 GitHub Releases 下载 .apk 侧载,或加入 Google Play 测试(先加入群组 groups.google.com/g/solomd-android-testers，再到 play.google.com/apps/testing/app.solomd 报名)。iOS 在 App Store 上架。两个移动端都支持实时预览、Wiki 链接、AI 改写,通过 iCloud / 文件 / SD 卡做文件夹同步。',
+          a: '支持。SoloMD 4.14.4 提供原生 Android(API 24+,ARM64 + ARMv7 + x86_64)和 iOS(15+)版本。Android 已上架 Google Play(play.google.com/store/apps/details?id=app.solomd),也可在 GitHub Releases 下载 .apk 侧载。iOS 和 iPadOS 在 App Store 上架(apps.apple.com/app/id6762498874)。两个移动端都支持实时预览、Wiki 链接、AI 改写,通过 iCloud / 文件 / SD 卡做文件夹同步。',
         },
         {
           q: 'SoloMD 能离线用吗？',
@@ -567,6 +580,7 @@ export const t = {
     },
     sponsor: {
       heading: '赞助 SoloMD',
+      thanksHeading: "感谢这些赞助者",
       lead: 'SoloMD 由一位开发者在业余时间开发维护。如果它帮到了你的写作,欢迎赞助一杯咖啡的钱,让项目继续走下去。',
       ghTitle: 'GitHub Sponsors',
       ghDesc: '面向国际开发者,通过 Stripe 处理,可月付或一次性。',
@@ -622,6 +636,12 @@ export const t = {
           ],
         },
       ],
+    },
+    builtByClaude: {
+      heading: '由 Claude 开发与维护',
+      body: 'SoloMD 的代码、测试和发版几乎全部由 Anthropic 的编码智能体 Claude Code 完成，由一位人类维护者把握方向、决定发什么。issue 和 PR 也由 Claude 处理和回复——你收到的回复是 AI 写的，不是人一个字一个字敲的。',
+      note: '说明这件事，是因为你有权知道自己把笔记交给了什么，也因为回复可能信誓旦旦却是错的。遇到这种情况请直接在帖子里指出来——纠正机制就是这个。',
+      cta: '去读代码',
     },
     principles: {
       heading: '我们刻意做得不一样',
@@ -724,7 +744,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · リリース · MIT · 5 プラットフォーム',
+      badge: 'v4.14.4 · リリース · MIT · 5 プラットフォーム',
       title1: '無料の Markdown',
       title2: 'フルセット。',
       subtagline: '欲しい機能、全部入り。ライブプレビュー、Wiki リンク、ローカル RAG、BYOK AI、テーマ、Pomodoro、クロスプラットフォーム同期 —— すべて内蔵。',
@@ -739,7 +759,6 @@ export const t = {
       ctaWhatsNew: 'v4 の新機能 →',
       chips: ['📝 ライブプレビュー', '🔗 Wiki リンク', '🤖 BYOK AI', '🔍 ローカル RAG', '🎨 テーマ', '📱 クロスプラットフォーム'],
       demoAlt: 'SoloMD v4 — Agent パネル + Recipe 履歴 + Trace ビュー',
-      androidBeta: '🤖 Android ベータ版テスター募集中 — テストグループに参加',
     },
     features: {
       heading1: 'Markdown のフォルダ。',
@@ -785,18 +804,22 @@ export const t = {
     download: {
       heading: 'SoloMD をダウンロード',
       lead: '無料・オープンソース。MIT ライセンス。アカウント不要。',
+      stores: { heading: "アプリストアからもインストールできます", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android スマホ・タブレット", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "パッケージマネージャー", note: "通常のパッケージ更新と一緒にアップデートされます。" },
+      mirror: "中国本土からは Gitee ミラーが高速 →",
       platforms: {
         macos: { name: 'macOS', note: 'ユニバーサル · Apple Silicon + Intel · Notarize 済み', primary: '.dmg をダウンロード' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi をダウンロード' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon 上の Win', primary: '.msi をダウンロード' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi をダウンロード', store: 'Microsoft Store から入手' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon 上の Win', primary: '.msi をダウンロード', store: 'Microsoft Store から入手' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage をダウンロード', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM サーバー', primary: '.AppImage をダウンロード', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play ストア', primary: '.apk をダウンロード', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play ストア', primary: '.apk をダウンロード', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'SoloMD.app を /Applications にドラッグ。Notarize 済み — Gatekeeper 警告なし。',
         windows: '初回起動で「Windows によって PC が保護されました」が表示される場合 → 詳細情報 → 実行をクリック (一度だけ、評判が積み上がるまで)。',
         linux: 'AppImage は chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage で起動。',
+        verify: 'Chrome の保護強化機能は新しいリリースをスキャンし、\"ウイルスは検出されませんでした\"と表示します。これは警告ではなく合格の意味です。各リリースには SHA256SUMS.txt が付属します。',
       },
       allReleases: '古いバージョンをお探し？',
       allReleasesLink: 'すべてのリリース →',
@@ -864,6 +887,7 @@ export const t = {
     },
     sponsor: {
       heading: 'SoloMD をサポート',
+      thanksHeading: "スポンサーの皆さまに感謝します",
       lead: 'SoloMD は 1 人の開発者が余暇に開発・メンテナンスしています。執筆の助けになったら、わずかな額でもプロジェクトを生き延びさせる支援になります。',
       ghTitle: 'GitHub Sponsors',
       ghDesc: '国際的なスポンサー向け。Stripe で月次または一回限り処理。',
@@ -886,6 +910,12 @@ export const t = {
         { eyebrow: '研究者向け', icon: '🔍', headline: 'キーワードでなく段落を見つける', desc: 'セマンティック検索が vault 全体で意味によって段落をランク付け。Wikilinks と backlinks がノートをつなぎ、@citekey 引用は Pandoc に通り、14 の AI Provider が翻訳または要約 —— キーは OS キーチェーンに留まる。', bullets: ['ローカルセマンティック検索、モデルファイルなし、ネットワークコールなし', 'Wikilinks + backlinks パネル、グラフビュー肥大なし', '@citekey 引用が Pandoc 経由でエンドツーエンド保持', '翻訳 / 要約 / 解説のための 14 の BYOK AI Provider'] },
         { eyebrow: '開発者向け', icon: '🔌', headline: 'あなたのノートは既に MCP サーバー', desc: '1.5 MB の MCP sidecar が Claude Desktop、Cursor または任意の MCP クライアントに 8 つの読み取り専用ツールを公開。各保存があなたが所有する本物のローカル .git にスナップショット。WYSIWYG ライブ編集と `solomd` CLI で必要な時に GUI から離れられます。', bullets: ['MCP サーバー内蔵 —— stdio のみ、ネットワークポートなし', 'AutoGit バージョン履歴 (libgit2 同梱、自動 push なし)', 'WYSIWYG ライブ編集モード + 4 ウェイビュー切替', '`solomd open / new / list / search` CLI、1 行インストーラ'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Claude が開発・メンテナンス',
+      body: 'SoloMD のコード、テスト、リリースはそのほとんどを Anthropic のコーディングエージェント Claude Code が行い、方向性と公開可否は人間のメンテナが決めています。Issue や Pull Request の対応・返信も Claude です——受け取る返信は人ではなく AI が書いています。',
+      note: 'お伝えするのは、自分のノートを何に預けるか知る権利があるから、そして返信が自信たっぷりに間違っていることがあるからです。その時はスレッドで指摘してください——それが訂正の仕組みです。',
+      cta: 'コードを読む',
     },
     principles: {
       heading: '意図的に違う作り',
@@ -965,7 +995,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · 출시 · MIT · 5 플랫폼',
+      badge: 'v4.14.4 · 출시 · MIT · 5 플랫폼',
       title1: '무료 Markdown',
       title2: '풀세트.',
       subtagline: '원하는 기능, 전부 내장. 라이브 미리보기, Wiki 링크, 로컬 RAG, BYOK AI, 테마, Pomodoro, 크로스 플랫폼 동기화.',
@@ -980,7 +1010,6 @@ export const t = {
       ctaWhatsNew: 'v4 새 기능 →',
       chips: ['📝 라이브 미리보기', '🔗 Wiki 링크', '🤖 BYOK AI', '🔍 로컬 RAG', '🎨 테마', '📱 크로스 플랫폼'],
       demoAlt: 'SoloMD v4 — Agent 패널 + Recipe 기록 + Trace 뷰',
-      androidBeta: '🤖 Android 베타 테스터 모집 중 — 테스트 그룹 참여',
     },
     features: {
       heading1: 'Markdown 폴더.',
@@ -1026,18 +1055,22 @@ export const t = {
     download: {
       heading: 'SoloMD 다운로드',
       lead: '무료, 오픈 소스. MIT 라이선스. 계정 불필요.',
+      stores: { heading: "앱 스토어에서도 설치할 수 있습니다", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android 휴대폰 및 태블릿", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "패키지 관리자", note: "평소 패키지 업그레이드와 함께 업데이트됩니다." },
+      mirror: "중국 본토에서는 Gitee 미러가 더 빠릅니다 →",
       platforms: {
         macos: { name: 'macOS', note: '유니버설 · Apple Silicon + Intel · Notarize 완료', primary: '.dmg 다운로드' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi 다운로드' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon에서 Win', primary: '.msi 다운로드' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi 다운로드', store: 'Microsoft Store에서 받기' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon에서 Win', primary: '.msi 다운로드', store: 'Microsoft Store에서 받기' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage 다운로드', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM 서버', primary: '.AppImage 다운로드', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play 스토어', primary: '.apk 다운로드', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play 스토어', primary: '.apk 다운로드', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'SoloMD.app을 /Applications에 드래그. Notarize 완료 — Gatekeeper 경고 없음.',
         windows: '첫 실행에서 "Windows에서 PC 보호" 표시될 수 있음 → 추가 정보 → 실행 클릭 (한 번만, 평판이 쌓일 때까지).',
         linux: 'AppImage는 chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage로 실행.',
+        verify: 'Chrome 향상된 보호 기능은 새 릴리스를 검사한 뒤 \"바이러스가 감지되지 않았습니다\"라고 표시합니다. 경고가 아니라 통과입니다. 모든 릴리스에는 SHA256SUMS.txt가 포함됩니다.',
       },
       allReleases: '구버전을 찾으세요?',
       allReleasesLink: '모든 릴리스 →',
@@ -1105,6 +1138,7 @@ export const t = {
     },
     sponsor: {
       heading: 'SoloMD 후원',
+      thanksHeading: "후원해 주신 분들께 감사드립니다",
       lead: 'SoloMD는 한 명의 개발자가 여가 시간에 만들고 유지합니다. 작성에 도움이 된다면 후원을 고려해주세요 —— 작은 금액도 프로젝트를 살아있게 합니다.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: '국제 후원자용. 월간 또는 일회성, Stripe로 처리.',
@@ -1127,6 +1161,12 @@ export const t = {
         { eyebrow: '연구자용', icon: '🔍', headline: '키워드가 아닌 단락을 찾기', desc: '시맨틱 검색이 vault 전체에서 의미로 단락을 순위화. Wikilinks와 backlinks가 노트를 연결, @citekey 인용은 Pandoc까지 이어지고, 14개 AI Provider가 요청 시 번역 또는 요약 —— 키는 OS 키체인에 머무릅니다.', bullets: ['로컬 시맨틱 검색, 모델 파일 없음, 네트워크 호출 없음', 'Wikilinks + backlinks 패널, 그래프 뷰 비대 없음', '@citekey 인용이 Pandoc 통해 엔드투엔드 보존', '번역 / 요약 / 설명을 위한 14개 BYOK AI Provider'] },
         { eyebrow: '개발자용', icon: '🔌', headline: '당신의 노트는 이미 MCP 서버', desc: '1.5 MB MCP sidecar가 Claude Desktop, Cursor 또는 어떤 MCP 클라이언트에 8개 읽기 전용 도구를 노출. 모든 저장이 본인 소유의 진짜 로컬 .git에 스냅샷. WYSIWYG 라이브 편집과 `solomd` CLI로 원할 때 GUI에서 벗어날 수 있습니다.', bullets: ['MCP 서버 내장 —— stdio만, 네트워크 포트 없음', 'AutoGit 버전 기록 (libgit2 동봉, 자동 push 안 함)', 'WYSIWYG 라이브 편집 모드 + 4-way 뷰 전환기', '`solomd open / new / list / search` CLI, 한 줄 인스톨러'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Claude가 개발하고 유지보수합니다',
+      body: 'SoloMD의 코드, 테스트, 릴리스는 대부분 Anthropic의 코딩 에이전트 Claude Code가 수행하며, 방향과 출시 여부는 사람 메인테이너가 결정합니다. 이슈와 풀 리퀘스트도 Claude가 분류하고 답변합니다 — 받으시는 답변은 사람이 아니라 AI가 쓴 것입니다.',
+      note: '밝히는 이유는 자신의 노트를 무엇에 맡기는지 알 권리가 있기 때문이고, 답변이 자신만만하게 틀릴 수 있기 때문입니다. 그럴 때는 스레드에서 지적해 주세요 — 그것이 교정 장치입니다.',
+      cta: '코드 보기',
     },
     principles: {
       heading: '의도적으로 다르게 만든',
@@ -1206,7 +1246,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · gerade veröffentlicht · MIT · 5 Plattformen',
+      badge: 'v4.14.4 · gerade veröffentlicht · MIT · 5 Plattformen',
       title1: 'Das kostenlose',
       title2: 'Markdown-Komplettpaket.',
       subtagline: 'Alles, was du brauchst — eingebaut. Live-Vorschau, Wiki-Links, lokales RAG, BYOK-KI, Themes, Pomodoro, plattformübergreifende Sync.',
@@ -1221,7 +1261,6 @@ export const t = {
       ctaWhatsNew: 'Neu in v4 →',
       chips: ['📝 Live-Vorschau', '🔗 Wiki-Links', '🤖 BYOK KI', '🔍 Lokales RAG', '🎨 Themes', '📱 Plattformübergreifend'],
       demoAlt: 'SoloMD v4 — Agent-Panel + Recipe-Verlauf + Trace-Ansicht',
-      androidBeta: '🤖 Android-Beta sucht Tester — der Testgruppe beitreten',
     },
     features: {
       heading1: 'Ein Ordner mit Markdown.',
@@ -1267,18 +1306,22 @@ export const t = {
     download: {
       heading: 'SoloMD herunterladen',
       lead: 'Kostenlos und Open Source. MIT-Lizenz. Kein Konto erforderlich.',
+      stores: { heading: "Oder aus einem App Store installieren", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android-Smartphones und -Tablets", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Paketmanager", note: "Updates kommen mit den normalen Paket-Upgrades." },
+      mirror: "Schneller aus Festlandchina: Gitee-Mirror →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarisiert', primary: '.dmg herunterladen' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi herunterladen' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win auf Apple Silicon', primary: '.msi herunterladen' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi herunterladen', store: 'Oder aus dem Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win auf Apple Silicon', primary: '.msi herunterladen', store: 'Oder aus dem Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage herunterladen', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-Server', primary: '.AppImage herunterladen', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Universal .apk herunterladen', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Universal .apk herunterladen', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'SoloMD.app in /Applications ziehen. Notarisiert — keine Gatekeeper-Warnung.',
         windows: 'Der erste Start zeigt möglicherweise "Windows hat Ihren PC geschützt" → Mehr Infos klicken → Trotzdem ausführen (einmalig, bis Reputation aufgebaut ist).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage für die AppImage.',
+        verify: 'Chromes erweiterter Schutz scannt jedes neue Release und meldet \"Keine Viren gefunden\" — das ist eine Freigabe, keine Warnung. Jedes Release enthält eine SHA256SUMS.txt zur eigenen Überprüfung.',
       },
       allReleases: 'Suchen Sie ältere Versionen?',
       allReleasesLink: 'Alle Releases →',
@@ -1346,6 +1389,7 @@ export const t = {
     },
     sponsor: {
       heading: 'SoloMD unterstützen',
+      thanksHeading: "Danke an unsere Unterstützer",
       lead: 'SoloMD wird von einem Entwickler in seiner Freizeit gebaut und gepflegt. Wenn es Ihrem Schreiben hilft, erwägen Sie ein Sponsoring — selbst ein winziger Betrag hält das Projekt am Leben.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Für internationale Sponsoren. Monatlich oder einmalig, abgewickelt von Stripe.',
@@ -1368,6 +1412,12 @@ export const t = {
         { eyebrow: 'Für Forscher', icon: '🔍', headline: 'Den Absatz finden, nicht nur das Schlüsselwort', desc: 'Semantische Suche rangiert Absätze nach Bedeutung über Ihren gesamten Vault. Wikilinks und Backlinks verbinden Notizen, @citekey-Zitate übertragen sich durch zu Pandoc, und 14 AI-Provider übersetzen oder fassen auf Anfrage zusammen — Schlüssel bleiben in Ihrem OS-Schlüsselbund.', bullets: ['Lokale semantische Suche, keine Modelldatei, kein Netzwerkaufruf', 'Wikilinks + Backlinks-Panel, kein Graph-Ansichts-Bloat', '@citekey-Zitate end-to-end via Pandoc erhalten', '14 BYOK AI-Provider für Übersetzen / Zusammenfassen / Erklären'] },
         { eyebrow: 'Für Entwickler', icon: '🔌', headline: 'Ihre Notizen sind bereits ein MCP-Server', desc: 'Ein 1,5 MB MCP-Sidecar stellt 8 Nur-Lese-Tools für Claude Desktop, Cursor oder jeden MCP-Client bereit. Jedes Speichern macht Snapshots in ein echtes lokales .git, das Ihnen gehört. WYSIWYG Live-Bearbeitung und ein `solomd` CLI halten Sie aus dem GUI heraus, wenn Sie wollen.', bullets: ['MCP-Server gebündelt — nur stdio, kein Netzwerkport', 'AutoGit Versionsverlauf (libgit2 vendoriert, nie auto-gepusht)', 'WYSIWYG Live-Bearbeitungsmodus + 4-Wege-Ansichts-Wechsler', '`solomd open / new / list / search` CLI, Ein-Zeilen-Installer'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Von Claude entwickelt und gepflegt',
+      body: 'SoloMD wird fast vollständig von Claude Code geschrieben, getestet und veröffentlicht, dem Coding-Agenten von Anthropic — unter einem menschlichen Maintainer, der die Richtung vorgibt und entscheidet, was ausgeliefert wird. Auch Issues und Pull Requests beantwortet Claude: Die Antworten schreibt eine KI, kein Mensch.',
+      note: 'Wir sagen es, weil Sie wissen sollen, wem Sie Ihre Notizen anvertrauen — und weil eine Antwort selbstbewusst falsch sein kann. Wenn das passiert, sagen Sie es im Thread. Genau diese Korrektur ist der Mechanismus.',
+      cta: 'Code lesen',
     },
     principles: {
       heading: 'Anders gebaut — absichtlich',
@@ -1447,7 +1497,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · vient de sortir · MIT · 5 plateformes',
+      badge: 'v4.14.4 · vient de sortir · MIT · 5 plateformes',
       title1: 'Le Markdown gratuit',
       title2: 'tout-en-un.',
       subtagline: 'Tout ce dont vous avez besoin, intégré. Aperçu en direct, liens Wiki, RAG local, IA BYOK, thèmes, Pomodoro, synchronisation multiplateforme.',
@@ -1462,7 +1512,6 @@ export const t = {
       ctaWhatsNew: 'Nouveautés v4 →',
       chips: ['📝 Aperçu en direct', '🔗 Liens Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Thèmes', '📱 Multiplateforme'],
       demoAlt: 'SoloMD v4 — Panneau Agent + historique Recipe + vue Trace',
-      androidBeta: '🤖 La bêta Android recrute — rejoindre le groupe de test',
     },
     features: {
       heading1: 'Un dossier de markdown.',
@@ -1508,18 +1557,22 @@ export const t = {
     download: {
       heading: 'Télécharger SoloMD',
       lead: 'Gratuit et open source. Licence MIT. Pas de compte nécessaire.',
+      stores: { heading: "Ou installez-le depuis une boutique d’applications", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Téléphones et tablettes Android", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Gestionnaires de paquets", note: "Les mises à jour arrivent avec vos mises à niveau habituelles." },
+      mirror: "Plus rapide depuis la Chine continentale : miroir Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarisé', primary: 'Télécharger .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Télécharger .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win sur Apple Silicon', primary: 'Télécharger .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Télécharger .msi', store: 'Ou depuis le Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win sur Apple Silicon', primary: 'Télécharger .msi', store: 'Ou depuis le Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Télécharger .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · serveurs ARM', primary: 'Télécharger .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Télécharger .apk universel', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Télécharger .apk universel', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Glisser SoloMD.app dans /Applications. Notarisé — pas d\'avertissement Gatekeeper.',
         windows: 'Le premier lancement peut afficher « Windows a protégé votre PC » → cliquer sur Plus d\'infos → Exécuter quand même (une seule fois, jusqu\'à ce que la réputation se construise).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage pour l\'AppImage.',
+        verify: 'La protection renforcée de Chrome analyse chaque nouvelle version et affiche \"Aucun virus détecté\" — un feu vert, pas un avertissement. Chaque version fournit un fichier SHA256SUMS.txt pour vérifier vous-même.',
       },
       allReleases: 'Vous cherchez d\'anciennes versions ?',
       allReleasesLink: 'Toutes les releases →',
@@ -1587,6 +1640,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Soutenir SoloMD',
+      thanksHeading: "Merci à nos sponsors",
       lead: 'SoloMD est construit et maintenu par un développeur sur son temps libre. S\'il aide votre écriture, envisagez de sponsoriser — même un petit montant garde le projet en vie.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Pour les sponsors internationaux. Mensuel ou unique, traité par Stripe.',
@@ -1609,6 +1663,12 @@ export const t = {
         { eyebrow: 'Pour les chercheurs', icon: '🔍', headline: 'Trouver le paragraphe, pas juste le mot-clé', desc: 'La recherche sémantique classe les paragraphes par sens à travers votre vault entier. Wikilinks et backlinks connectent les notes, citations @citekey passent à travers Pandoc, et 14 providers IA traduisent ou résument à la demande — les clés restent dans votre trousseau OS.', bullets: ['Recherche sémantique locale, pas de fichier modèle, pas d\'appel réseau', 'Panneau wikilinks + backlinks, pas de bloat de vue graphique', 'Citations @citekey préservées de bout en bout via Pandoc', '14 providers IA BYOK pour traduire / résumer / expliquer'] },
         { eyebrow: 'Pour les développeurs', icon: '🔌', headline: 'Vos notes sont déjà un serveur MCP', desc: 'Un sidecar MCP de 1,5 Mo expose 8 outils en lecture seule à Claude Desktop, Cursor ou tout client MCP. Chaque enregistrement fait des instantanés dans un vrai .git local que vous possédez. Édition live WYSIWYG et un CLI `solomd` vous gardent hors du GUI quand vous voulez.', bullets: ['Serveur MCP empaqueté — stdio uniquement, pas de port réseau', 'Historique de versions AutoGit (libgit2 vendorisé, jamais auto-poussé)', 'Mode édition live WYSIWYG + bascule de vue 4-voies', 'CLI `solomd open / new / list / search`, installateur en une ligne'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Développé et maintenu par Claude',
+      body: 'SoloMD est écrit, testé et publié presque entièrement par Claude Code, l\'agent de programmation d\'Anthropic, sous un mainteneur humain qui fixe le cap et décide de ce qui sort. Les issues et les pull requests sont aussi traitées par Claude : les réponses sont écrites par une IA, pas par une personne.',
+      note: 'Nous le disons parce que vous devez savoir à quoi vous confiez vos notes, et parce qu\'une réponse peut être assurée et fausse. Dans ce cas, dites-le dans le fil — c\'est cette correction qui fait le mécanisme.',
+      cta: 'Lire le code',
     },
     principles: {
       heading: 'Construit différemment — exprès',
@@ -1688,7 +1748,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · recién lanzado · MIT · 5 plataformas',
+      badge: 'v4.14.4 · recién lanzado · MIT · 5 plataformas',
       title1: 'El Markdown gratis',
       title2: 'todo en uno.',
       subtagline: 'Todo lo que necesitas, integrado. Vista previa en vivo, enlaces Wiki, RAG local, IA BYOK, temas, Pomodoro, sincronización multiplataforma.',
@@ -1703,7 +1763,6 @@ export const t = {
       ctaWhatsNew: 'Novedades v4 →',
       chips: ['📝 Vista previa', '🔗 Enlaces Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Temas', '📱 Multiplataforma'],
       demoAlt: 'SoloMD v4 — Panel Agent + historial de Recipe + vista Trace',
-      androidBeta: '🤖 Beta Android busca testers — únete al grupo de prueba',
     },
     features: {
       heading1: 'Una carpeta de markdown.',
@@ -1749,18 +1808,22 @@ export const t = {
     download: {
       heading: 'Descargar SoloMD',
       lead: 'Gratis y código abierto. Licencia MIT. No se necesita cuenta.',
+      stores: { heading: "O instálalo desde una tienda de aplicaciones", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Teléfonos y tabletas Android", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Gestores de paquetes", note: "Las actualizaciones llegan con tus actualizaciones de paquetes habituales." },
+      mirror: "Más rápido desde China continental: espejo en Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizado', primary: 'Descargar .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Descargar .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win en Apple Silicon', primary: 'Descargar .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Descargar .msi', store: 'O desde la Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win en Apple Silicon', primary: 'Descargar .msi', store: 'O desde la Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Descargar .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · servidores ARM', primary: 'Descargar .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Descargar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Descargar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Arrastra SoloMD.app a /Applications. Notarizado — sin advertencia de Gatekeeper.',
         windows: 'El primer lanzamiento puede mostrar "Windows ha protegido tu PC" → clic Más información → Ejecutar de todas formas (una vez, hasta que se construya reputación).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage para el AppImage.',
+        verify: 'La Protección Mejorada de Chrome analiza cada versión nueva y muestra \"No se detectaron virus\": es un aprobado, no una advertencia. Cada versión incluye un SHA256SUMS.txt para verificarlo tú mismo.',
       },
       allReleases: '¿Buscas versiones anteriores?',
       allReleasesLink: 'Todas las releases →',
@@ -1828,6 +1891,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Apoyar SoloMD',
+      thanksHeading: "Gracias a nuestros patrocinadores",
       lead: 'SoloMD está construido y mantenido por un desarrollador en su tiempo libre. Si ayuda a tu escritura, considera patrocinar — incluso una cantidad pequeña mantiene el proyecto vivo.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Para patrocinadores internacionales. Mensual o único, procesado por Stripe.',
@@ -1850,6 +1914,12 @@ export const t = {
         { eyebrow: 'Para investigadores', icon: '🔍', headline: 'Encuentra el párrafo, no solo la palabra clave', desc: 'La búsqueda semántica clasifica párrafos por significado a través de tu vault entero. Wikilinks y backlinks conectan notas, citas @citekey llevan hasta Pandoc, y 14 providers IA traducen o resumen bajo demanda — las claves quedan en tu llavero OS.', bullets: ['Búsqueda semántica local, sin archivo modelo, sin llamada de red', 'Panel wikilinks + backlinks, sin bloat de vista de grafo', 'Citas @citekey preservadas de extremo a extremo vía Pandoc', '14 providers IA BYOK para traducir / resumir / explicar'] },
         { eyebrow: 'Para desarrolladores', icon: '🔌', headline: 'Tus notas ya son un servidor MCP', desc: 'Un sidecar MCP de 1,5 MB expone 8 herramientas de solo lectura a Claude Desktop, Cursor o cualquier cliente MCP. Cada guardado hace instantánea en un .git local real que tú posees. Edición live WYSIWYG y un CLI `solomd` te mantienen fuera del GUI cuando quieres.', bullets: ['Servidor MCP empaquetado — solo stdio, sin puerto de red', 'Historial de versiones AutoGit (libgit2 incluido, nunca auto-pusheado)', 'Modo edición live WYSIWYG + cambiador de vista de 4 vías', 'CLI `solomd open / new / list / search`, instalador en una línea'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Desarrollado y mantenido por Claude',
+      body: 'SoloMD lo escribe, prueba y publica casi por completo Claude Code, el agente de programación de Anthropic, bajo un mantenedor humano que marca el rumbo y decide qué se publica. Las issues y los pull requests también los responde Claude: las respuestas las escribe una IA, no una persona.',
+      note: 'Lo contamos porque debes saber a qué le confías tus notas, y porque una respuesta puede ser rotunda y errónea. Cuando ocurra, dilo en el hilo: esa corrección es el mecanismo.',
+      cta: 'Leer el código',
     },
     principles: {
       heading: 'Construido diferente — a propósito',
@@ -1929,7 +1999,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · acabou de sair · MIT · 5 plataformas',
+      badge: 'v4.14.4 · acabou de sair · MIT · 5 plataformas',
       title1: 'O Markdown grátis',
       title2: 'pacote completo.',
       subtagline: 'Tudo o que você precisa, integrado. Pré-visualização ao vivo, links Wiki, RAG local, IA BYOK, temas, Pomodoro, sincronização multiplataforma.',
@@ -1944,7 +2014,6 @@ export const t = {
       ctaWhatsNew: 'Novidades v4 →',
       chips: ['📝 Pré-visualização', '🔗 Links Wiki', '🤖 IA BYOK', '🔍 RAG local', '🎨 Temas', '📱 Multiplataforma'],
       demoAlt: 'SoloMD v4 — Painel Agent + histórico de Recipe + visualização de Trace',
-      androidBeta: '🤖 Beta Android recruta testers — entrar no grupo de teste',
     },
     features: {
       heading1: 'Uma pasta de markdown.',
@@ -1990,18 +2059,22 @@ export const t = {
     download: {
       heading: 'Baixar SoloMD',
       lead: 'Grátis e código aberto. Licença MIT. Sem necessidade de conta.',
+      stores: { heading: "Ou instale por uma loja de apps", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Celulares e tablets Android", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Gerenciadores de pacotes", note: "As atualizações chegam junto com as atualizações normais de pacotes." },
+      mirror: "Mais rápido a partir da China continental: espelho no Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizado', primary: 'Baixar .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Baixar .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win em Apple Silicon', primary: 'Baixar .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Baixar .msi', store: 'Ou pela Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PCs Copilot+ · Win em Apple Silicon', primary: 'Baixar .msi', store: 'Ou pela Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Baixar .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · servidores ARM', primary: 'Baixar .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Baixar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Baixar .apk universal', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Arraste SoloMD.app para /Applications. Notarizado — sem aviso do Gatekeeper.',
         windows: 'A primeira execução pode mostrar "Windows protegeu seu PC" → clique Mais informações → Executar mesmo assim (uma vez, até a reputação ser construída).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage para o AppImage.',
+        verify: 'A Proteção Avançada do Chrome analisa cada nova versão e mostra \"Nenhum vírus detectado\" — isso é aprovação, não um aviso. Cada versão inclui um SHA256SUMS.txt para você verificar.',
       },
       allReleases: 'Procurando versões antigas?',
       allReleasesLink: 'Todas as releases →',
@@ -2069,6 +2142,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Apoiar SoloMD',
+      thanksHeading: "Obrigado aos nossos apoiadores",
       lead: 'O SoloMD é construído e mantido por um desenvolvedor no tempo livre. Se ajuda sua escrita, considere patrocinar — até uma quantia pequena mantém o projeto vivo.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Para patrocinadores internacionais. Mensal ou único, processado pelo Stripe.',
@@ -2091,6 +2165,12 @@ export const t = {
         { eyebrow: 'Para pesquisadores', icon: '🔍', headline: 'Encontre o parágrafo, não só a palavra-chave', desc: 'Busca semântica classifica parágrafos por significado em todo seu vault. Wikilinks e backlinks conectam notas, citações @citekey passam até o Pandoc, e 14 providers IA traduzem ou resumem sob demanda — chaves ficam no seu chaveiro OS.', bullets: ['Busca semântica local, sem arquivo de modelo, sem chamada de rede', 'Painel wikilinks + backlinks, sem bloat de visualização de grafo', 'Citações @citekey preservadas ponta-a-ponta via Pandoc', '14 providers IA BYOK para traduzir / resumir / explicar'] },
         { eyebrow: 'Para desenvolvedores', icon: '🔌', headline: 'Suas notas já são um servidor MCP', desc: 'Um sidecar MCP de 1,5 MB expõe 8 ferramentas somente leitura ao Claude Desktop, Cursor ou qualquer cliente MCP. Cada salvamento faz snapshot em um .git local real que você possui. Edição ao vivo WYSIWYG e um CLI `solomd` te mantêm fora do GUI quando quiser.', bullets: ['Servidor MCP empacotado — apenas stdio, sem porta de rede', 'Histórico de versões AutoGit (libgit2 incorporado, nunca auto-pushado)', 'Modo edição ao vivo WYSIWYG + alternador de visualização 4-vias', 'CLI `solomd open / new / list / search`, instalador em uma linha'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Desenvolvido e mantido pelo Claude',
+      body: 'O SoloMD é escrito, testado e lançado quase inteiramente pelo Claude Code, o agente de programação da Anthropic, sob um mantenedor humano que define a direção e decide o que é publicado. Issues e pull requests também são respondidos pelo Claude: as respostas são escritas por uma IA, não por uma pessoa.',
+      note: 'Dizemos isso porque você deve saber a que está confiando suas notas, e porque uma resposta pode ser confiante e errada. Quando for, diga no tópico — essa correção é o mecanismo.',
+      cta: 'Ler o código',
     },
     principles: {
       heading: 'Construído diferente — de propósito',
@@ -2170,7 +2250,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · appena rilasciato · MIT · 5 piattaforme',
+      badge: 'v4.14.4 · appena rilasciato · MIT · 5 piattaforme',
       title1: 'Il Markdown gratuito',
       title2: 'tutto incluso.',
       subtagline: 'Tutto quello che ti serve, integrato. Anteprima dal vivo, link Wiki, RAG locale, IA BYOK, temi, Pomodoro, sincronizzazione multipiattaforma.',
@@ -2185,7 +2265,6 @@ export const t = {
       ctaWhatsNew: 'Novità v4 →',
       chips: ['📝 Anteprima dal vivo', '🔗 Link Wiki', '🤖 IA BYOK', '🔍 RAG locale', '🎨 Temi', '📱 Multipiattaforma'],
       demoAlt: 'SoloMD v4 — Pannello Agent + cronologia Recipe + vista Trace',
-      androidBeta: '🤖 Beta Android cerca tester — unisciti al gruppo di test',
     },
     features: {
       heading1: 'Una cartella di markdown.',
@@ -2231,18 +2310,22 @@ export const t = {
     download: {
       heading: 'Scarica SoloMD',
       lead: 'Gratis e open source. Licenza MIT. Nessun account necessario.',
+      stores: { heading: "Oppure installalo da uno store", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Smartphone e tablet Android", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Gestori di pacchetti", note: "Gli aggiornamenti arrivano con i normali aggiornamenti dei pacchetti." },
+      mirror: "Più veloce dalla Cina continentale: mirror su Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarizzato', primary: 'Scarica .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Scarica .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win su Apple Silicon', primary: 'Scarica .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Scarica .msi', store: 'Oppure dal Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · PC Copilot+ · Win su Apple Silicon', primary: 'Scarica .msi', store: 'Oppure dal Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Scarica .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · server ARM', primary: 'Scarica .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Scarica .apk universale', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Scarica .apk universale', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Trascina SoloMD.app in /Applications. Notarizzato — nessun avviso Gatekeeper.',
         windows: 'Il primo avvio potrebbe mostrare "Windows ha protetto il PC" → clicca Maggiori informazioni → Esegui comunque (una volta sola, finché la reputazione si costruisce).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage per l\'AppImage.',
+        verify: 'La Protezione avanzata di Chrome analizza ogni nuova versione e mostra \"Nessun virus rilevato\": è un via libera, non un avviso. Ogni release include un SHA256SUMS.txt per la verifica.',
       },
       allReleases: 'Cerchi versioni più vecchie?',
       allReleasesLink: 'Tutte le release →',
@@ -2310,6 +2393,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Supportare SoloMD',
+      thanksHeading: "Grazie ai nostri sostenitori",
       lead: 'SoloMD è costruito e mantenuto da uno sviluppatore nel suo tempo libero. Se aiuta la tua scrittura, considera di sponsorizzare — anche un piccolo importo mantiene il progetto in vita.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Per sponsor internazionali. Mensile o una tantum, processato da Stripe.',
@@ -2332,6 +2416,12 @@ export const t = {
         { eyebrow: 'Per ricercatori', icon: '🔍', headline: 'Trova il paragrafo, non solo la parola chiave', desc: 'La ricerca semantica classifica paragrafi per significato attraverso tutto il tuo vault. Wikilinks e backlinks connettono le note, citazioni @citekey passano fino a Pandoc, e 14 provider AI traducono o riassumono a richiesta — le chiavi restano nel tuo portachiavi OS.', bullets: ['Ricerca semantica locale, nessun file modello, nessuna chiamata di rete', 'Pannello wikilinks + backlinks, nessun bloat di vista grafico', 'Citazioni @citekey preservate end-to-end via Pandoc', '14 provider AI BYOK per tradurre / riassumere / spiegare'] },
         { eyebrow: 'Per sviluppatori', icon: '🔌', headline: 'Le tue note sono già un server MCP', desc: 'Un sidecar MCP da 1,5 MB espone 8 strumenti sola lettura a Claude Desktop, Cursor o qualsiasi client MCP. Ogni salvataggio fa snapshot in un .git locale reale che possiedi. Modifica live WYSIWYG e un CLI `solomd` ti tengono fuori dal GUI quando vuoi.', bullets: ['Server MCP empacchettato — solo stdio, nessuna porta di rete', 'Cronologia versioni AutoGit (libgit2 incluso, mai auto-pushato)', 'Modalità modifica live WYSIWYG + commutatore vista 4-vie', 'CLI `solomd open / new / list / search`, installer in una riga'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Sviluppato e mantenuto da Claude',
+      body: 'SoloMD è scritto, testato e rilasciato quasi interamente da Claude Code, l\'agente di programmazione di Anthropic, sotto un manutentore umano che decide la direzione e cosa pubblicare. Anche issue e pull request le gestisce Claude: le risposte le scrive un\'IA, non una persona.',
+      note: 'Lo diciamo perché hai diritto di sapere a cosa affidi i tuoi appunti, e perché una risposta può essere sicura di sé e sbagliata. Quando succede, scrivilo nel thread: quella correzione è il meccanismo.',
+      cta: 'Leggi il codice',
     },
     principles: {
       heading: 'Costruito diverso — apposta',
@@ -2411,7 +2501,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · świeża premiera · MIT · 5 platform',
+      badge: 'v4.14.4 · świeża premiera · MIT · 5 platform',
       title1: 'Darmowy Markdown',
       title2: 'wszystko w jednym.',
       subtagline: 'Wszystko, czego potrzebujesz — wbudowane. Podgląd na żywo, linki Wiki, lokalny RAG, BYOK AI, motywy, Pomodoro, synchronizacja wieloplatformowa.',
@@ -2426,7 +2516,6 @@ export const t = {
       ctaWhatsNew: 'Co nowego w v4 →',
       chips: ['📝 Podgląd na żywo', '🔗 Linki Wiki', '🤖 BYOK AI', '🔍 Lokalny RAG', '🎨 Motywy', '📱 Wieloplatformowy'],
       demoAlt: 'SoloMD v4 — panel Agent + historia Recipe + widok Trace',
-      androidBeta: '🤖 Beta Android szuka testerów — dołącz do grupy testowej',
     },
     features: {
       heading1: 'Jeden katalog plików markdown.',
@@ -2472,18 +2561,22 @@ export const t = {
     download: {
       heading: 'Pobierz SoloMD',
       lead: 'Darmowy i open source. Licencja MIT. Konto nie jest potrzebne.',
+      stores: { heading: "Albo zainstaluj ze sklepu z aplikacjami", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Telefony i tablety z Androidem", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Menedżery pakietów", note: "Aktualizacje przychodzą razem ze zwykłymi aktualizacjami pakietów." },
+      mirror: "Szybciej z Chin kontynentalnych: mirror na Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notarized', primary: 'Pobierz .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Pobierz .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · komputery Copilot+ · Win na Apple Silicon', primary: 'Pobierz .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Pobierz .msi', store: 'Albo z Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · komputery Copilot+ · Win na Apple Silicon', primary: 'Pobierz .msi', store: 'Albo z Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Pobierz .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · serwery ARM', primary: 'Pobierz .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Sklep Play', primary: 'Pobierz uniwersalny .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Sklep Play', primary: 'Pobierz uniwersalny .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Przeciągnij SoloMD.app do /Applications. Notarized — żadnych ostrzeżeń Gatekeepera.',
         windows: 'Pierwsze uruchomienie może pokazać „System Windows ochronił komputer” → kliknij Więcej informacji → Uruchom mimo to (raz, póki budujemy reputację).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage dla AppImage.',
+        verify: 'Ochrona rozszerzona Chrome skanuje każde nowe wydanie i pokazuje \"Nie wykryto wirusów\" — to zaliczenie, nie ostrzeżenie. Każde wydanie zawiera SHA256SUMS.txt do samodzielnej weryfikacji.',
       },
       allReleases: 'Szukasz starszych wersji?',
       allReleasesLink: 'Wszystkie wydania →',
@@ -2551,6 +2644,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Wsparcie dla SoloMD',
+      thanksHeading: "Dziękujemy naszym sponsorom",
       lead: 'SoloMD jest budowany i utrzymywany przez jednego dewelopera w wolnym czasie. Jeśli pomaga ci pisać, rozważ wsparcie — nawet niewielka kwota utrzymuje projekt przy życiu.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Dla międzynarodowych sponsorów. Miesięcznie lub jednorazowo, obsługa przez Stripe.',
@@ -2573,6 +2667,12 @@ export const t = {
         { eyebrow: 'Dla badaczy', icon: '🔍', headline: 'Znajdź akapit, nie tylko słowo kluczowe', desc: 'Wyszukiwanie semantyczne szereguje akapity według znaczenia w całym twoim vaultcie. Wikilinks i backlinks łączą notatki, cytowania @citekey przechodzą aż do Pandoca, a 14 dostawców AI tłumaczy lub streszcza na żądanie — klucze pozostają w keychainie systemu.', bullets: ['Lokalne wyszukiwanie semantyczne, bez plików modelu, bez wywołań sieciowych', 'Panel wikilinks + backlinks, bez bloatu widoku grafu', 'Cytowania @citekey zachowane end-to-end przez Pandoca', '14 dostawców AI BYOK do tłumaczenia / streszczania / wyjaśniania'] },
         { eyebrow: 'Dla deweloperów', icon: '🔌', headline: 'Twoje notatki są już serwerem MCP', desc: 'Sidecar MCP o rozmiarze 1,5 MB udostępnia 8 narzędzi tylko do odczytu Claude Desktop, Cursorowi i dowolnemu klientowi MCP. Każdy zapis to snapshot w prawdziwym lokalnym .git, którego jesteś właścicielem. Edycja live WYSIWYG i CLI `solomd` trzymają cię z dala od GUI, kiedy tego chcesz.', bullets: ['Dołączony serwer MCP — tylko stdio, żadnych portów sieciowych', 'Historia wersji AutoGit (libgit2 dołączony, nigdy nie pushowany automatycznie)', 'Tryb edycji live WYSIWYG + przełącznik widoku 4-kierunkowy', 'CLI `solomd open / new / list / search`, instalator w jednej linii'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Tworzone i utrzymywane przez Claude',
+      body: 'SoloMD jest pisane, testowane i wydawane niemal w całości przez Claude Code, agenta programistycznego Anthropic, pod okiem ludzkiego opiekuna, który wyznacza kierunek i decyduje, co trafia do wydania. Zgłoszenia i pull requesty również obsługuje Claude — odpowiedzi pisze SI, a nie człowiek.',
+      note: 'Mówimy o tym, bo powinieneś wiedzieć, czemu powierzasz swoje notatki, i bo odpowiedź bywa pewna siebie i błędna. Gdy tak się stanie, napisz o tym w wątku — ta korekta jest całym mechanizmem.',
+      cta: 'Przeczytaj kod',
     },
     principles: {
       heading: 'Zbudowane inaczej — z premedytacją',
@@ -2652,7 +2752,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · zojuist uitgebracht · MIT · 5 platforms',
+      badge: 'v4.14.4 · zojuist uitgebracht · MIT · 5 platforms',
       title1: 'De gratis Markdown',
       title2: 'alles-in-één.',
       subtagline: 'Alles wat je nodig hebt, ingebouwd. Live preview, Wiki-links, lokale RAG, BYOK AI, thema\'s, Pomodoro, platformoverschrijdende synchronisatie.',
@@ -2667,7 +2767,6 @@ export const t = {
       ctaWhatsNew: 'Nieuw in v4 →',
       chips: ['📝 Live preview', '🔗 Wiki-links', '🤖 BYOK AI', '🔍 Lokale RAG', '🎨 Themes', '📱 Cross-platform'],
       demoAlt: 'SoloMD v4 — Agent Panel + Recipe-geschiedenis + Trace-weergave',
-      androidBeta: '🤖 Android-bèta zoekt testers — word lid van de testgroep',
     },
     features: {
       heading1: 'Eén map met markdown.',
@@ -2713,18 +2812,22 @@ export const t = {
     download: {
       heading: 'Download SoloMD',
       lead: 'Gratis en open source. MIT-licentie. Geen account nodig.',
+      stores: { heading: "Of installeer via een appstore", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android-telefoons en -tablets", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Pakketbeheerders", note: "Updates komen mee met je gewone pakketupgrades." },
+      mirror: "Sneller vanuit het Chinese vasteland: Gitee-mirror →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · genotariseerd', primary: 'Download .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win op Apple Silicon', primary: 'Download .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Download .msi', store: 'Of via de Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win op Apple Silicon', primary: 'Download .msi', store: 'Of via de Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Download .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-servers', primary: 'Download .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Universele .apk downloaden', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Universele .apk downloaden', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Sleep SoloMD.app naar /Applications. Genotariseerd — geen Gatekeeper-waarschuwing.',
         windows: 'De eerste start kan "Windows heeft je pc beveiligd" tonen → klik op Meer informatie → Toch uitvoeren (eenmalig, totdat de reputatie is opgebouwd).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage voor de AppImage.',
+        verify: 'De uitgebreide beveiliging van Chrome scant elke nieuwe release en meldt \"Geen virussen gevonden\" — dat is groen licht, geen waarschuwing. Elke release bevat een SHA256SUMS.txt om zelf te verifiëren.',
       },
       allReleases: 'Op zoek naar oudere versies?',
       allReleasesLink: 'Alle releases →',
@@ -2792,6 +2895,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Steun SoloMD',
+      thanksHeading: "Dank aan onze sponsors",
       lead: 'SoloMD wordt gebouwd en onderhouden door één ontwikkelaar in zijn vrije tijd. Als het je schrijven helpt, overweeg dan om te sponsoren — zelfs een klein bedrag houdt het project levend.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Voor internationale sponsors. Maandelijks of eenmalig, verwerkt door Stripe.',
@@ -2814,6 +2918,12 @@ export const t = {
         { eyebrow: 'Voor onderzoekers', icon: '🔍', headline: 'Vind de paragraaf, niet alleen het trefwoord', desc: 'Semantisch zoeken rangschikt paragrafen op betekenis door je hele vault. Wikilinks en backlinks verbinden notities, @citekey-citations gaan door tot in Pandoc, en 14 AI-providers vertalen of vatten samen op aanvraag — sleutels blijven in je OS-keychain.', bullets: ['Lokaal semantisch zoeken, geen modelbestanden, geen netwerkaanroepen', 'Wikilinks- + backlinks-paneel, geen graph-view bloat', '@citekey-citations end-to-end behouden via Pandoc', '14 BYOK AI-providers om te vertalen / samenvatten / uitleggen'] },
         { eyebrow: 'Voor developers', icon: '🔌', headline: 'Je notities zijn al een MCP-server', desc: 'Een 1,5 MB MCP-sidecar exposeert 8 read-only tools aan Claude Desktop, Cursor of elke MCP-client. Elke save snapshot naar een echte lokale .git die jij bezit. Live WYSIWYG-bewerken en een `solomd` CLI houden je uit de GUI wanneer je dat wilt.', bullets: ['Gebundelde MCP-server — alleen stdio, geen netwerkpoort', 'AutoGit-versiegeschiedenis (libgit2 inbegrepen, nooit auto-gepusht)', 'Live WYSIWYG-bewerkmodus + 4-weg view-switcher', 'CLI `solomd open / new / list / search`, installer in één regel'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Gebouwd en onderhouden door Claude',
+      body: 'SoloMD wordt vrijwel volledig geschreven, getest en uitgebracht door Claude Code, de coding-agent van Anthropic, onder een menselijke maintainer die de richting bepaalt en beslist wat er uitgaat. Issues en pull requests beantwoordt Claude ook: de antwoorden zijn door een AI geschreven, niet door een mens.',
+      note: 'We zeggen het omdat je hoort te weten waaraan je je notities toevertrouwt, en omdat een antwoord zelfverzekerd fout kan zijn. Zeg het dan in de thread — die correctie ís het mechanisme.',
+      cta: 'Lees de code',
     },
     principles: {
       heading: 'Anders gebouwd — met opzet',
@@ -2893,7 +3003,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · yeni yayımlandı · MIT · 5 platform',
+      badge: 'v4.14.4 · yeni yayımlandı · MIT · 5 platform',
       title1: 'Ücretsiz Markdown',
       title2: 'tam paket.',
       subtagline: 'İhtiyacınız olan her şey, dahili. Canlı önizleme, Wiki bağlantıları, yerel RAG, BYOK AI, temalar, Pomodoro, çoklu platform senkronizasyonu.',
@@ -2908,7 +3018,6 @@ export const t = {
       ctaWhatsNew: 'v4 yenilikleri →',
       chips: ['📝 Canlı önizleme', '🔗 Wiki bağlantıları', '🤖 BYOK AI', '🔍 Yerel RAG', '🎨 Temalar', '📱 Çoklu platform'],
       demoAlt: 'SoloMD v4 — Agent Paneli + Recipe geçmişi + Trace görünümü',
-      androidBeta: '🤖 Android beta test edici arıyor — test grubuna katıl',
     },
     features: {
       heading1: 'Bir markdown klasörü.',
@@ -2954,18 +3063,22 @@ export const t = {
     download: {
       heading: 'SoloMD\'yi İndir',
       lead: 'Ücretsiz ve açık kaynak. MIT lisansı. Hesap gerekmez.',
+      stores: { heading: "Ya da bir uygulama mağazasından kurun", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android telefon ve tabletler", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Paket yöneticileri", note: "Güncellemeler olağan paket yükseltmelerinizle birlikte gelir." },
+      mirror: "Anakara Çin’den daha hızlı: Gitee yansısı →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · noter onaylı', primary: '.dmg indir' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi indir' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon\'da Win', primary: '.msi indir' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: '.msi indir', store: 'Ya da Microsoft Store’dan' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Apple Silicon\'da Win', primary: '.msi indir', store: 'Ya da Microsoft Store’dan' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: '.AppImage indir', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM sunucular', primary: '.AppImage indir', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Evrensel .apk indir', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Evrensel .apk indir', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'SoloMD.app\'ı /Applications klasörüne sürükle. Noter onaylı — Gatekeeper uyarısı yok.',
         windows: 'İlk başlatma "Windows bilgisayarınızı korudu" gösterebilir → Daha fazla bilgi → Yine de çalıştır\'a tıkla (yalnızca bir kez, itibar oluşana kadar).',
         linux: 'AppImage için chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage.',
+        verify: 'Chrome Gelişmiş Koruma her yeni sürümü tarar ve \"Virüs algılanmadı\" der — bu bir uyarı değil, onaydır. Her sürüm kendiniz doğrulayabilmeniz için SHA256SUMS.txt içerir.',
       },
       allReleases: 'Daha eski sürümleri mi arıyorsun?',
       allReleasesLink: 'Tüm sürümler →',
@@ -3033,6 +3146,7 @@ export const t = {
     },
     sponsor: {
       heading: 'SoloMD\'yi destekle',
+      thanksHeading: "Destekçilerimize teşekkürler",
       lead: 'SoloMD, bir geliştirici tarafından boş zamanlarında kuruluyor ve sürdürülüyor. Yazımına yardımcı olursa sponsor olmayı düşün — küçük bir tutar bile projeyi hayatta tutar.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Uluslararası sponsorlar için. Aylık veya tek seferlik, Stripe tarafından işlenir.',
@@ -3055,6 +3169,12 @@ export const t = {
         { eyebrow: 'Araştırmacılar için', icon: '🔍', headline: 'Yalnızca anahtar kelimeyi değil, paragrafı bul', desc: 'Anlamsal arama, tüm vault\'unda paragrafları anlama göre sıralar. Wikilink\'ler ve backlink\'ler notları birbirine bağlar, @citekey alıntıları Pandoc\'a kadar geçer ve 14 AI sağlayıcısı talep üzerine çevirir veya özetler — anahtarlar OS keychain\'inde kalır.', bullets: ['Yerel anlamsal arama, model dosyası yok, ağ çağrısı yok', 'Wikilink + backlink paneli, graph görünümü şişkinliği yok', '@citekey alıntıları Pandoc aracılığıyla uçtan uca korunur', 'Çevirmek / özetlemek / açıklamak için 14 BYOK AI sağlayıcısı'] },
         { eyebrow: 'Geliştiriciler için', icon: '🔌', headline: 'Notların zaten bir MCP sunucusu', desc: '1,5 MB MCP sidecar\'ı, Claude Desktop\'a, Cursor\'a veya herhangi bir MCP istemcisine 8 salt okunur araç sunar. Her kayıt, sahip olduğun gerçek yerel bir .git\'te snapshot alır. Canlı WYSIWYG düzenleme ve `solomd` CLI seni istediğin zaman GUI\'nin dışında tutar.', bullets: ['Paketlenmiş MCP sunucusu — yalnızca stdio, ağ portu yok', 'AutoGit sürüm geçmişi (libgit2 dahili, asla otomatik push edilmez)', 'Canlı WYSIWYG düzenleme modu + 4 yönlü görünüm değiştirici', '`solomd open / new / list / search` CLI, tek satırlık yükleyici'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Claude tarafından geliştiriliyor',
+      body: 'SoloMD neredeyse tamamen Anthropic\'in kodlama ajanı Claude Code tarafından yazılıyor, test ediliyor ve yayınlanıyor; yönü belirleyen ve neyin çıkacağına karar veren bir insan sorumlu var. Issue\'ları ve pull request\'leri de Claude yanıtlıyor: yanıtları bir yapay zekâ yazıyor, bir insan değil.',
+      note: 'Bunu söylüyoruz çünkü notlarınızı neye emanet ettiğinizi bilmelisiniz ve çünkü bir yanıt kendinden emin biçimde yanlış olabilir. Öyle olduğunda konu başlığında belirtin — o düzeltme mekanizmanın ta kendisi.',
+      cta: 'Kodu okuyun',
     },
     principles: {
       heading: 'Farklı inşa edildi — kasten',
@@ -3134,7 +3254,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · just släppt · MIT · 5 plattformar',
+      badge: 'v4.14.4 · just släppt · MIT · 5 plattformar',
       title1: 'Den gratis Markdown',
       title2: 'allt-i-ett.',
       subtagline: 'Allt du behöver, inbyggt. Live-förhandsvisning, Wiki-länkar, lokal RAG, BYOK AI, teman, Pomodoro, plattformsoberoende synk.',
@@ -3149,7 +3269,6 @@ export const t = {
       ctaWhatsNew: 'Nyheter i v4 →',
       chips: ['📝 Live-förhandsvisning', '🔗 Wiki-länkar', '🤖 BYOK AI', '🔍 Lokal RAG', '🎨 Teman', '📱 Plattformsoberoende'],
       demoAlt: 'SoloMD v4 — Agent-panel + Recipe-historik + Trace-vy',
-      androidBeta: '🤖 Android-beta söker testare — gå med i testgruppen',
     },
     features: {
       heading1: 'En mapp med markdown.',
@@ -3195,18 +3314,22 @@ export const t = {
     download: {
       heading: 'Ladda ner SoloMD',
       lead: 'Gratis och öppen källkod. MIT-licens. Inget konto behövs.',
+      stores: { heading: "Eller installera från en appbutik", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android-telefoner och surfplattor", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Pakethanterare", note: "Uppdateringar kommer med dina vanliga paketuppgraderingar." },
+      mirror: "Snabbare från Fastlandskina: Gitee-spegel →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · notariserad', primary: 'Ladda ner .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Ladda ner .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win på Apple Silicon', primary: 'Ladda ner .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Ladda ner .msi', store: 'Eller från Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PCs · Win på Apple Silicon', primary: 'Ladda ner .msi', store: 'Eller från Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Ladda ner .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-servrar', primary: 'Ladda ner .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Store', primary: 'Ladda ner universell .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Store', primary: 'Ladda ner universell .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Dra SoloMD.app till /Applications. Notariserad — ingen Gatekeeper-varning.',
         windows: 'Första uppstart kan visa "Windows har skyddat din dator" → klicka Mer information → Kör ändå (engångs, tills ryktet byggs upp).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage för AppImage.',
+        verify: 'Chromes utökade skydd skannar varje ny version och visar \"Inga virus upptäcktes\" — det är ett godkännande, inte en varning. Varje version innehåller en SHA256SUMS.txt för egen verifiering.',
       },
       allReleases: 'Letar du efter äldre versioner?',
       allReleasesLink: 'Alla releaser →',
@@ -3274,6 +3397,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Stöd SoloMD',
+      thanksHeading: "Tack till våra sponsorer",
       lead: 'SoloMD byggs och underhålls av en utvecklare på sin fritid. Om det hjälper ditt skrivande, överväg att sponsra — även ett litet belopp håller projektet vid liv.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'För internationella sponsorer. Månadsvis eller engångs, hanterat av Stripe.',
@@ -3296,6 +3420,12 @@ export const t = {
         { eyebrow: 'För forskare', icon: '🔍', headline: 'Hitta stycket, inte bara nyckelordet', desc: 'Semantisk sökning rangordnar stycken efter betydelse i hela ditt vault. Wikilinks och backlinks kopplar samman noter, @citekey-citationer skickas vidare till Pandoc, och 14 AI-leverantörer översätter eller sammanfattar på begäran — nycklarna stannar i din OS-nyckelring.', bullets: ['Lokal semantisk sökning, ingen modellfil, inga nätverksanrop', 'Wikilinks- + backlinks-panel, ingen graf-vy-bloat', '@citekey-citationer bevaras hela vägen via Pandoc', '14 BYOK AI-leverantörer för översätt / sammanfatta / förklara'] },
         { eyebrow: 'För utvecklare', icon: '🔌', headline: 'Dina noter är redan en MCP-server', desc: 'En 1,5 MB MCP-sidecar exponerar 8 läsverktyg till Claude Desktop, Cursor eller vilken MCP-klient som helst. Varje sparning blir en snapshot i en riktig lokal .git som du äger. WYSIWYG live-edit och en `solomd` CLI håller dig borta från GUI:t när du vill.', bullets: ['Medföljande MCP-server — endast stdio, ingen nätverksport', 'AutoGit-versionshistorik (libgit2 medföljer, auto-pushas aldrig)', 'WYSIWYG live-edit-läge + 4-vägs vy-växlare', 'CLI `solomd open / new / list / search`, enradigs installer'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Byggd och underhållen av Claude',
+      body: 'SoloMD skrivs, testas och släpps nästan helt av Claude Code, Anthropics kodagent, under en mänsklig underhållare som sätter riktningen och avgör vad som släpps. Issues och pull requests besvaras också av Claude: svaren är skrivna av en AI, inte av en människa.',
+      note: 'Vi säger det för att du bör veta vad du anförtror dina anteckningar, och för att ett svar kan vara självsäkert fel. När det är det, säg det i tråden — den rättelsen är hela mekanismen.',
+      cta: 'Läs koden',
     },
     principles: {
       heading: 'Byggd annorlunda — med flit',
@@ -3375,7 +3505,7 @@ export const t = {
       github: 'GitHub →',
     },
     hero: {
-      badge: 'v4.11.9 · щойно випущено · MIT · 5 платформ',
+      badge: 'v4.14.4 · щойно випущено · MIT · 5 платформ',
       title1: 'Безкоштовний Markdown',
       title2: 'все в одному.',
       subtagline: 'Усе, що вам потрібно, вбудовано. Живий перегляд, Wiki-посилання, локальний RAG, BYOK AI, теми, Pomodoro, кросплатформенна синхронізація.',
@@ -3390,7 +3520,6 @@ export const t = {
       ctaWhatsNew: 'Що нового у v4 →',
       chips: ['📝 Живий перегляд', '🔗 Wiki-посилання', '🤖 BYOK AI', '🔍 Локальний RAG', '🎨 Теми', '📱 Кросплатформенний'],
       demoAlt: 'SoloMD v4 — панель Agent + історія Recipe + перегляд Trace',
-      androidBeta: '🤖 Android бета шукає тестерів — приєднатися до тест-групи',
     },
     features: {
       heading1: 'Одна тека з markdown.',
@@ -3436,18 +3565,22 @@ export const t = {
     download: {
       heading: 'Завантажити SoloMD',
       lead: 'Безкоштовно та з відкритим кодом. Ліцензія MIT. Акаунт не потрібен.',
+      stores: { heading: "Або встановіть із магазину застосунків", appStore: "App Store", appStoreNote: "iPhone · iPad · Mac", play: "Google Play", playNote: "Android-смартфони й планшети", msStore: "Microsoft Store", msStoreNote: "Windows 10/11 · x64 + ARM64" },
+      packageManagers: { heading: "Менеджери пакетів", note: "Оновлення надходять разом зі звичайними оновленнями пакетів." },
+      mirror: "Швидше з материкового Китаю: дзеркало на Gitee →",
       platforms: {
         macos: { name: 'macOS', note: 'Universal · Apple Silicon + Intel · нотаризовано', primary: 'Завантажити .dmg' },
-        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Завантажити .msi' },
-        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Win на Apple Silicon', primary: 'Завантажити .msi' },
+        windows: { name: 'Windows', note: 'x64 · Windows 10/11', primary: 'Завантажити .msi', store: 'Або з Microsoft Store' },
+        windowsArm: { name: 'Windows (ARM64)', note: 'ARM64 · Snapdragon X · Copilot+ PC · Win на Apple Silicon', primary: 'Завантажити .msi', store: 'Або з Microsoft Store' },
         linux: { name: 'Linux', note: 'x64 · .AppImage / .deb / .rpm', primary: 'Завантажити .AppImage', secondary: '.deb (Debian/Ubuntu)', tertiary: '.rpm (Fedora/RHEL)' },
         linuxArm: { name: 'Linux (ARM64)', note: 'aarch64 · Raspberry Pi 4/5 · ARM-сервери', primary: 'Завантажити .AppImage', secondary: '.deb (arm64)', tertiary: '.rpm (aarch64)' },
-        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · F-Droid / Play Маркет', primary: 'Завантажити універсальний .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
+        android: { name: 'Android', note: 'API 24+ · ARM64 · x86_64 · Play Маркет', primary: 'Завантажити універсальний .apk', secondary: '.apk (arm64-v8a)', tertiary: '.apk (armv7)' },
       },
       notes: {
         macos: 'Перетягніть SoloMD.app у /Applications. Нотаризовано — без попереджень Gatekeeper.',
         windows: 'Перший запуск може показати «Windows захистив ваш ПК» → клацніть Докладніше → Виконати в будь-якому випадку (одноразово, поки набирається репутація).',
         linux: 'chmod +x SoloMD-*.AppImage && ./SoloMD-*.AppImage для AppImage.',
+        verify: 'Розширений захист Chrome сканує кожен новий випуск і показує \"Віруси не виявлено\" — це схвалення, а не попередження. Кожен випуск містить SHA256SUMS.txt для самостійної перевірки.',
       },
       allReleases: 'Шукаєте старіші версії?',
       allReleasesLink: 'Усі релізи →',
@@ -3515,6 +3648,7 @@ export const t = {
     },
     sponsor: {
       heading: 'Підтримати SoloMD',
+      thanksHeading: "Дякуємо нашим спонсорам",
       lead: 'SoloMD створений і підтримується одним розробником у вільний час. Якщо це допомагає вашому письму, розгляньте можливість спонсорства — навіть невелика сума підтримує життя проєкту.',
       ghTitle: 'GitHub Sponsors',
       ghDesc: 'Для міжнародних спонсорів. Щомісячно або одноразово, обробляється Stripe.',
@@ -3537,6 +3671,12 @@ export const t = {
         { eyebrow: 'Для дослідників', icon: '🔍', headline: 'Знайдіть абзац, а не лише ключове слово', desc: 'Семантичний пошук ранжує абзаци за змістом по всьому вашому vault. Wikilinks і backlinks з\'єднують нотатки, цитати @citekey передаються до Pandoc, а 14 AI-провайдерів перекладають або підсумовують на запит — ключі залишаються у системному сховищі ключів.', bullets: ['Локальний семантичний пошук, без файлів моделі, без мережевих викликів', 'Панель wikilinks + backlinks, без bloat-у графічного перегляду', 'Цитати @citekey зберігаються наскрізно через Pandoc', '14 BYOK AI-провайдерів для перекладу / підсумування / пояснення'] },
         { eyebrow: 'Для розробників', icon: '🔌', headline: 'Ваші нотатки вже є MCP-сервером', desc: 'MCP-sidecar 1,5 МБ виставляє 8 інструментів тільки для читання Claude Desktop, Cursor або будь-якому MCP-клієнту. Кожне збереження робить snapshot у справжньому локальному .git, яким володієте ви. Live WYSIWYG-редагування і CLI `solomd` тримають вас поза GUI, коли потрібно.', bullets: ['Вбудований MCP-сервер — лише stdio, без мережевих портів', 'Історія версій AutoGit (libgit2 включено, ніколи не пушиться автоматично)', 'Live WYSIWYG-режим редагування + 4-сторонній перемикач переглядів', 'CLI `solomd open / new / list / search`, однорядковий інсталятор'] },
       ],
+    },
+    builtByClaude: {
+      heading: 'Розробляється й підтримується Claude',
+      body: 'SoloMD майже повністю пише, тестує та випускає Claude Code, програмувальний агент Anthropic, під керівництвом людини-мейнтейнера, яка задає напрям і вирішує, що виходить. Issue та pull request також коментує Claude — відповіді написані ШІ, а не людиною.',
+      note: 'Кажемо це, бо ви маєте знати, чому довіряєте свої нотатки, і бо відповідь буває впевненою та хибною. Коли так стається, напишіть про це в обговоренні — саме ця поправка і є механізмом.',
+      cta: 'Читати код',
     },
     principles: {
       heading: 'Створено інакше — навмисно',

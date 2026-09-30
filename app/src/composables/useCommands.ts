@@ -1,17 +1,20 @@
+import { FORMAT_KINDS } from '../lib/md-format';
+import { invoke } from '@tauri-apps/api/core';
 import { useFiles } from './useFiles';
 import { useSettingsStore } from '../stores/settings';
+import { shortcutLabel } from '../lib/keybindings';
+import { isMacOS, isMobile } from '../lib/platform';
 import { useTabsStore } from '../stores/tabs';
 import { useTilesStore } from '../stores/tiles';
 import { useExport } from './useExport';
 import { useToastsStore } from '../stores/toasts';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { openNewWindow } from '../lib/new-window';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-import {
-  simplifiedToTraditional,
-  traditionalToSimplified,
-  pinyin,
-} from '../lib/chinese';
+// opencc-js + pinyin-pro are dictionaries, not code; loading them at startup
+// cost every launch for a command most users never run.
+const loadChineseConvert = () => import('../lib/chinese-convert');
 import { cleanAIArtifacts, stripMarkdownToPlain } from '../lib/clean-ai';
 import { openWelcomeTour } from '../lib/welcome-tour';
 import { formatMarkdown } from '../lib/markdown-format';
@@ -26,9 +29,11 @@ import { useAutoCommit } from './useAutoCommit';
 import { useWorkspaceIndexStore } from '../stores/workspaceIndex';
 import { useGitHistoryStore } from '../stores/gitHistory';
 import { useWorkspaceStore } from '../stores/workspace';
+import { requestNewFileInTree } from './useFileTreeNewFile';
 import { useGithubSyncStore } from '../stores/githubSync';
 import { useGithubSync } from './useGithubSync';
 import { IS_APP_STORE_BUILD } from '../lib/app-build';
+import { hasGitBackend } from '../lib/platform';
 
 export interface Command {
   id: string;
@@ -41,6 +46,11 @@ export interface Command {
 export function useCommands(): Command[] {
   const files = useFiles();
   const settings = useSettingsStore();
+  // #180 — the palette must show the chord that actually works today, not
+  // the one that shipped: a rebound action would otherwise advertise a key
+  // that now does something else.
+  const mac = isMacOS();
+  const kb = (actionId: string) => shortcutLabel(actionId, settings.keybindings, mac) || undefined;
   const tabs = useTabsStore();
   const tiles = useTilesStore();
   const exporter = useExport();
@@ -56,6 +66,16 @@ export function useCommands(): Command[] {
   const ws = useWorkspaceStore();
   const ghSync = useGithubSyncStore();
   const ghSyncOps = useGithubSync();
+
+  /** Heading folding runs inside the editor component; the focused pane picks
+   *  the event up (same routing as find). */
+  function dispatchFold(action: 'toggle' | 'all' | 'none' | 'level', level?: number) {
+    window.dispatchEvent(
+      new CustomEvent('solomd:fold', {
+        detail: { action, level, paneId: tiles.focusedPaneId },
+      }),
+    );
+  }
 
   /** Build a solomd.app/share/?repo=...&path=...&branch=main URL for the
    *  active tab, if it's inside a workspace linked to a public-looking
@@ -121,19 +141,41 @@ export function useCommands(): Command[] {
     toasts.success(successMsg);
   }
 
+  /** Same, for the transforms whose dictionaries are loaded on demand. */
+  async function transformActiveLazy(
+    pick: (m: typeof import('../lib/chinese-convert')) => (s: string) => string,
+    successMsg: string,
+  ) {
+    transformActive(pick(await loadChineseConvert()), successMsg);
+  }
+
   const all: Command[] = [
-    { id: 'file.new', title: 'New Markdown File', shortcut: 'Ctrl+N', run: () => files.newFile() },
-    { id: 'file.newText', title: 'New Plain Text File', shortcut: 'Ctrl+Alt+N', run: () => files.newTextFile() },
-    { id: 'file.open', title: 'Open File…', shortcut: 'Ctrl+O', run: () => files.openFile() },
-    { id: 'file.save', title: 'Save', shortcut: 'Ctrl+S', run: () => files.saveActive() },
-    { id: 'file.saveAs', title: 'Save As…', shortcut: 'Ctrl+Shift+S', run: () => files.saveActiveAs() },
+    { id: 'file.new', title: 'New Markdown File', shortcut: kb('file.new'), run: () => files.newFile() },
+    { id: 'file.newText', title: 'New Plain Text File', shortcut: kb('file.newText'), run: () => files.newTextFile() },
+    {
+      // #338 — create in the folder selected in the file tree (the selected
+      // file's folder for a file), named inline like the tree's own ＋. With
+      // no folder open there is no tree to name it in, so it is a plain new
+      // note.
+      id: 'file.newInFolder',
+      title: 'New Note in Selected Folder',
+      shortcut: kb('file.newInFolder'),
+      run: () => {
+        if (!ws.currentFolder) return void files.newFile();
+        if (!settings.showFileTree) settings.toggleFileTree();
+        requestNewFileInTree();
+      },
+    },
+    { id: 'file.open', title: 'Open File…', shortcut: kb('file.open'), run: () => files.openFile() },
+    { id: 'file.save', title: 'Save', shortcut: kb('file.save'), run: () => files.saveActive() },
+    { id: 'file.saveAs', title: 'Save As…', shortcut: kb('file.saveAs'), run: () => files.saveActiveAs() },
     {
       id: 'file.openFolder',
       title: 'Open Folder…',
       hint: 'Browse files in the sidebar',
       run: () => files.openFolder(),
     },
-    { id: 'file.closeTab', title: 'Close Tab', shortcut: 'Ctrl+W', run: () => tabs.activeId && files.closeTabSafe(tabs.activeId) },
+    { id: 'file.closeTab', title: 'Close Tab', shortcut: kb('file.closeTab'), run: () => tabs.activeId && files.closeTabSafe(tabs.activeId) },
 
     // v4.0.3 — Open active document in system default editor
     {
@@ -158,19 +200,26 @@ export function useCommands(): Command[] {
     { id: 'view.editor', title: 'View: Edit Only', run: () => settings.setViewMode('edit') },
     { id: 'view.split', title: 'View: Split', run: () => settings.setViewMode('split') },
     { id: 'view.preview', title: 'View: Preview Only', run: () => settings.setViewMode('preview') },
-    { id: 'view.cycleView', title: 'View: Cycle Mode', shortcut: 'Ctrl+Shift+P', run: () => settings.cycleViewMode() },
-    { id: 'view.toggleOutline', title: 'View: Toggle Outline', shortcut: 'Ctrl+Shift+O', run: () => { const tabs = useTabsStore(); if (tabs.activeId) tabs.toggleOutline(tabs.activeId); } },
-    { id: 'view.toggleFileTree', title: 'View: Toggle File Tree', shortcut: 'Ctrl+B', run: () => settings.toggleFileTree() },
-    { id: 'view.toggleRightSidebar', title: 'View: Toggle Right Sidebar', hint: 'Hide / show the Outline / Backlinks / Tags / History / Agent strip without losing per-pane preferences', shortcut: 'Ctrl+Alt+B', run: () => settings.toggleRightSidebar() },
+    { id: 'view.cycleView', title: 'View: Cycle Mode', shortcut: kb('view.cycleView'), run: () => settings.cycleViewMode() },
+    { id: 'view.toggleLiveEdit', title: 'View: Toggle Live Edit / Edit Only', shortcut: kb('view.toggleLiveEdit'), run: () => settings.toggleLiveEditSource() },
+    { id: 'view.toggleOutline', title: 'View: Toggle Outline', shortcut: kb('view.toggleOutline'), run: () => { const tabs = useTabsStore(); if (tabs.activeId) tabs.toggleOutline(tabs.activeId); } },
+    { id: 'view.toggleFileTree', title: 'View: Toggle File Tree', shortcut: kb('view.toggleFileTree'), run: () => settings.toggleFileTree() },
+    { id: 'view.toggleRightSidebar', title: 'View: Toggle Right Sidebar', hint: 'Hide / show the Outline / Backlinks / Tags / History / Agent strip without losing per-pane preferences', shortcut: kb('view.toggleRightSidebar'), run: () => settings.toggleRightSidebar() },
     { id: 'view.toggleAgentPanel', title: 'View: Toggle Agent Panel', hint: 'Right-side chat-with-vault panel — streamed multi-turn AI with tool-call cards, persisted run history, and trace replay', run: () => settings.toggleAgentPanel() },
     { id: 'view.toggleBacklinks', title: 'View: Toggle Backlinks Pane', run: () => settings.toggleBacklinks() },
     { id: 'view.relationships', title: 'View: Toggle Relationships Pane', hint: 'Typed relationships — forward edges authored in YAML front matter plus computed inverses (Referenced by)', run: () => settings.toggleRelationships() },
     { id: 'view.toggleTagsPanel', title: 'View: Toggle Tags Pane', run: () => settings.toggleTagsPanel() },
+    {
+      id: 'view.toggleTasksPanel',
+      title: 'View: Toggle Tasks Pane',
+      hint: 'Every unfinished `- [ ]` in this workspace, grouped by file',
+      run: () => settings.toggleTasksPanel(),
+    },
     { id: 'view.toggleNeighborhood', title: 'View: Toggle Neighborhood Pane', hint: 'Per-note relationship explorer — frontmatter wikilink groups, inverse relationships, and backlinks; click to open, ⌘/Ctrl-click to pivot', run: () => settings.toggleNeighborhood() },
     { id: 'view.toggleTypesPanel', title: 'View: Toggle Types Pane', hint: 'Type-driven sidebar — notes with `type:<Name>` grouped into collapsible first-class sections (types-as-lenses)', run: () => settings.toggleTypesPanel() },
     { id: 'type.create', title: 'Types: New Type…', hint: 'Create a type-definition note (`type: Type`) so its members get a first-class sidebar section', run: () => { if (!settings.showTypesPanel) settings.toggleTypesPanel(); window.dispatchEvent(new CustomEvent('solomd:create-type')); } },
     { id: 'view.toggleHistoryPanel', title: 'View: Toggle History Pane', hint: 'Show / hide the per-note version history pane (does not disable Auto-Git)', run: () => settings.toggleHistoryPanel() },
-    { id: 'view.toggleInspector', title: 'View: Toggle Properties Inspector', shortcut: 'Ctrl+Shift+I', hint: 'Edit the active note’s YAML frontmatter as typed properties (text / number / date / status / tags / relation)', run: () => settings.toggleInspector() },
+    { id: 'view.toggleInspector', title: 'View: Toggle Properties Inspector', shortcut: kb('view.toggleInspector'), hint: 'Edit the active note’s YAML frontmatter as typed properties (text / number / date / status / tags / relation)', run: () => settings.toggleInspector() },
     { id: 'view.resetSidebarPanes', title: 'View: Reset Sidebar Pane Heights', hint: 'Clear stored per-pane heights so the right sidebar returns to even-share flex layout', run: () => settings.clearRightSidebarPaneHeights() },
     { id: 'view.toggleWrap', title: 'View: Toggle Word Wrap', run: () => settings.toggleWordWrap() },
     { id: 'view.toggleLineNumbers', title: 'View: Toggle Line Numbers', run: () => settings.toggleLineNumbers() },
@@ -178,19 +227,20 @@ export function useCommands(): Command[] {
     { id: 'view.toggleLivePreview', title: 'View: Toggle Live Preview / Raw Source (Markdown)', run: () => settings.toggleLivePreview() },
     { id: 'view.toggleSpellCheck', title: 'View: Toggle Spell Check', run: () => settings.toggleSpellCheck() },
     { id: 'view.toggleFocusMode', title: 'View: Toggle Focus Mode', run: () => settings.toggleFocusMode() },
+    { id: 'view.toggleToolbar', title: 'View: Show / Hide Toolbar Buttons', shortcut: kb('view.toggleToolbar'), run: () => settings.toggleToolbarHidden() },
     { id: 'view.toggleTypewriter', title: 'View: Toggle Typewriter Mode', run: () => settings.toggleTypewriterMode() },
 
     // ---- Tile layout ----
-    { id: 'tile.splitRight', title: 'Split Editor Right', shortcut: 'Ctrl+\\', run: () => tiles.splitPane(tiles.focusedPaneId, 'horizontal') },
-    { id: 'tile.splitDown', title: 'Split Editor Down', shortcut: 'Ctrl+Shift+\\', run: () => tiles.splitPane(tiles.focusedPaneId, 'vertical') },
+    { id: 'tile.splitRight', title: 'Split Editor Right', shortcut: kb('tile.splitRight'), run: () => tiles.splitPane(tiles.focusedPaneId, 'horizontal') },
+    { id: 'tile.splitDown', title: 'Split Editor Down', shortcut: kb('tile.splitDown'), run: () => tiles.splitPane(tiles.focusedPaneId, 'vertical') },
     { id: 'tile.closePane', title: 'Close Pane', run: () => tiles.closePane(tiles.focusedPaneId) },
-    { id: 'tile.focusNext', title: 'Focus Next Pane', shortcut: 'Ctrl+Alt+Right', run: () => tiles.focusNextPane() },
-    { id: 'tile.focusPrev', title: 'Focus Previous Pane', shortcut: 'Ctrl+Alt+Left', run: () => tiles.focusPrevPane() },
+    { id: 'tile.focusNext', title: 'Focus Next Pane', shortcut: kb('tile.focusNext'), run: () => tiles.focusNextPane() },
+    { id: 'tile.focusPrev', title: 'Focus Previous Pane', shortcut: kb('tile.focusPrev'), run: () => tiles.focusPrevPane() },
 
     {
       id: 'search.global',
       title: 'Search in Folder…',
-      shortcut: 'Ctrl+Shift+F',
+      shortcut: kb('search.global'),
       hint: 'Search across all .md / .txt files in the open folder',
       run: () => window.dispatchEvent(new CustomEvent('solomd:open-global-search')),
     },
@@ -202,6 +252,7 @@ export function useCommands(): Command[] {
       run: async () => {
         const path = await openFileDialog({
           multiple: false,
+          defaultPath: await files.filePickerStartDir(),
           filters: [{ name: 'CSS', extensions: ['css'] }],
         });
         if (path && typeof path === 'string') {
@@ -223,12 +274,12 @@ export function useCommands(): Command[] {
       id: 'cn.s2t',
       title: 'Chinese: Simplified → Traditional',
       hint: 'Convert document content',
-      run: () => transformActive(simplifiedToTraditional, 'Converted to Traditional'),
+      run: () => transformActiveLazy((m) => m.simplifiedToTraditional, 'Converted to Traditional'),
     },
     {
       id: 'cn.t2s',
       title: 'Chinese: Traditional → Simplified',
-      run: () => transformActive(traditionalToSimplified, 'Converted to Simplified'),
+      run: () => transformActiveLazy((m) => m.traditionalToSimplified, 'Converted to Simplified'),
     },
     {
       id: 'cn.copyPinyin',
@@ -239,7 +290,7 @@ export function useCommands(): Command[] {
           toasts.warning('No active document');
           return;
         }
-        await writeText(pinyin(t.content));
+        await writeText((await loadChineseConvert()).pinyin(t.content));
         toasts.success('Pinyin copied to clipboard');
       },
     },
@@ -251,7 +302,7 @@ export function useCommands(): Command[] {
     {
       id: 'proofread.cjk',
       title: 'CJK Proofread — flag Chinese typos',
-      shortcut: 'Ctrl+Shift+J',
+      shortcut: kb('proofread.cjk'),
       hint: 'Half-/full-width punct, 的/地/得 misuse, repeats, spacing',
       run: () => window.dispatchEvent(new CustomEvent('solomd:open-cjk-proofread')),
     },
@@ -259,13 +310,87 @@ export function useCommands(): Command[] {
     {
       id: 'editor.find',
       title: 'Find / Replace in note…',
-      shortcut: 'Ctrl+F',
+      shortcut: kb('editor.find'),
       hint: 'Open the find & replace bar in the current editor',
       run: () =>
         window.dispatchEvent(
           new CustomEvent('solomd:editor-find', { detail: { paneId: tiles.focusedPaneId } }),
         ),
     },
+
+    {
+      id: 'file.import',
+      title: 'Import Documents…',
+      shortcut: kb('file.import'),
+      hint: 'Convert Word / PDF / HTML / spreadsheets / slides / EPUB into Markdown notes in this workspace',
+      run: () => void files.importDocuments(),
+    },
+
+    {
+      id: 'capture.quick',
+      title: 'Quick Capture…',
+      hint: 'Open the small capture box and file a note straight into the Inbox',
+      run: async () => {
+        try {
+          await invoke('quick_capture_open');
+        } catch (e) {
+          toasts.error(`Quick capture failed: ${e}`);
+        }
+      },
+    },
+
+    {
+      id: 'editor.formulaEditor',
+      title: 'Edit Formula…',
+      shortcut: kb('editor.formulaEditor'),
+      hint: 'Edit the LaTeX under the cursor with a live preview and a symbol palette, or insert a new formula',
+      run: () =>
+        window.dispatchEvent(
+          new CustomEvent('solomd:edit-formula', { detail: { paneId: tiles.focusedPaneId } }),
+        ),
+    },
+
+    {
+      id: 'editor.tableEditor',
+      title: 'Edit Table…',
+      shortcut: kb('editor.tableEditor'),
+      hint: 'Edit the table under the cursor as a grid — add / move / delete rows and columns, set alignment',
+      run: () =>
+        window.dispatchEvent(
+          new CustomEvent('solomd:edit-table', { detail: { paneId: tiles.focusedPaneId } }),
+        ),
+    },
+
+    {
+      id: 'fold.toggle',
+      title: 'Fold: Toggle Section at Cursor',
+      shortcut: kb('fold.toggle'),
+      hint: 'Collapse (or expand) the heading section the cursor is in',
+      run: () => dispatchFold('toggle'),
+    },
+    {
+      id: 'fold.all',
+      title: 'Fold: Collapse All Sections',
+      shortcut: kb('fold.all'),
+      hint: 'Collapse every heading section in this note',
+      run: () => dispatchFold('all'),
+    },
+    {
+      id: 'fold.none',
+      title: 'Fold: Expand All',
+      shortcut: kb('fold.none'),
+      hint: 'Expand everything that is folded, including code blocks and tables',
+      run: () => dispatchFold('none'),
+    },
+    ...[1, 2, 3, 4, 5, 6].map((level) => ({
+      id: `fold.level${level}`,
+      title: `Fold: Show Down to Level ${level}`,
+      hint:
+        level === 1
+          ? 'Collapse the whole outline — only H1 headings stay visible'
+          : `Keep headings H1–H${level} visible and fold everything under them`,
+      run: () => dispatchFold('level', level),
+    })),
 
     {
       id: 'editor.insertImage',
@@ -278,6 +403,7 @@ export function useCommands(): Command[] {
         }
         const sel = await openFileDialog({
           multiple: false,
+          defaultPath: await files.filePickerStartDir(),
           filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tiff'] }],
         });
         if (typeof sel !== 'string') return;
@@ -287,6 +413,46 @@ export function useCommands(): Command[] {
           }),
         );
       },
+    },
+
+    // #296 / #274 — every formatting command, so they are discoverable from
+    // the palette and not only by knowing the chord. Titles come from
+    // `cmd.fmt.<kind>` in the locale files.
+    ...FORMAT_KINDS.map((kind) => ({
+      id: `fmt.${kind}`,
+      title: `Format: ${kind}`,
+      hint: 'Selection, or the word under the cursor. Run again to remove.',
+      shortcut: kb(`fmt.${kind}`),
+      run: () => window.dispatchEvent(new CustomEvent('solomd:format-markdown', { detail: { kind } })),
+    })),
+
+    // Gitee IK8QG3. Acts on the selection, or the word under the caret when
+    // there is nothing selected. Shift+F3 cycles lower → UPPER → Title, which
+    // is the Word convention most writers already have in their fingers.
+    {
+      id: 'editor.caseCycle',
+      title: 'Cycle Case (lower / UPPER / Title)',
+      hint: 'Selection, or the word under the cursor',
+      shortcut: kb('editor.caseCycle'),
+      run: () => window.dispatchEvent(new CustomEvent('solomd:transform-case', { detail: { mode: 'cycle' } })),
+    },
+    {
+      id: 'editor.caseUpper',
+      title: 'UPPERCASE',
+      hint: 'Selection, or the word under the cursor',
+      run: () => window.dispatchEvent(new CustomEvent('solomd:transform-case', { detail: { mode: 'upper' } })),
+    },
+    {
+      id: 'editor.caseLower',
+      title: 'lowercase',
+      hint: 'Selection, or the word under the cursor',
+      run: () => window.dispatchEvent(new CustomEvent('solomd:transform-case', { detail: { mode: 'lower' } })),
+    },
+    {
+      id: 'editor.caseTitle',
+      title: 'Title Case',
+      hint: 'Selection, or the word under the cursor',
+      run: () => window.dispatchEvent(new CustomEvent('solomd:transform-case', { detail: { mode: 'title' } })),
     },
 
     {
@@ -316,7 +482,7 @@ export function useCommands(): Command[] {
     {
       id: 'format.markdown',
       title: 'Format Markdown (Prettier)',
-      shortcut: 'Ctrl+Alt+L',
+      shortcut: kb('format.markdown'),
       hint: 'Reformat the active document — normalize lists, tables, spacing',
       run: async () => {
         const t = tabs.activeTab;
@@ -359,23 +525,25 @@ export function useCommands(): Command[] {
 
     { id: 'export.html', title: 'Export to HTML…', run: () => exporter.exportHtml() },
     { id: 'export.docx', title: 'Export to Word (DOCX)…', run: () => exporter.exportDocx() },
-    { id: 'export.pdf', title: 'Export to PDF…', run: () => exporter.exportPdf() },
-    { id: 'export.pdfPrint', title: 'Export to PDF via System Print…', shortcut: 'Ctrl+Shift+Alt+P', run: () => exporter.exportPdfPrint() },
+    // Gitee IK8QJQ — the raster/text distinction decides whether the output
+    // is searchable, so it belongs in the palette too, not just the toolbar.
+    { id: 'export.pdfPrint', title: 'Export to PDF (text)…', hint: 'real selectable text, via system print', shortcut: kb('export.pdfPrint'), run: () => exporter.exportPdfPrint() },
+    { id: 'export.pdf', title: 'Export to PDF (image)…', hint: 'rasterised, text not selectable', run: () => exporter.exportPdf() },
     { id: 'export.image', title: 'Export to Image (PNG)…', run: () => exporter.exportImage() },
     { id: 'export.epub', title: 'Export to EPUB…', hint: 'via Pandoc', run: () => pandoc.exportTo('epub') },
     { id: 'export.odt', title: 'Export to ODT…', hint: 'via Pandoc', run: () => pandoc.exportTo('odt') },
     { id: 'export.latex', title: 'Export to LaTeX…', hint: 'via Pandoc', run: () => pandoc.exportTo('latex') },
     { id: 'export.rtf', title: 'Export to RTF…', hint: 'via Pandoc', run: () => pandoc.exportTo('rtf') },
     { id: 'export.pandocCustom', title: 'Export via Pandoc Template…', run: () => pandoc.exportTo('custom') },
-    { id: 'export.copyHtml', title: 'Copy as HTML', shortcut: 'Ctrl+Shift+C', run: () => exporter.copyAsHtml() },
+    { id: 'export.copyHtml', title: 'Copy as HTML', shortcut: kb('export.copyHtml'), run: () => exporter.copyAsHtml() },
     { id: 'export.copyPlain', title: 'Copy as Plain Text', run: () => exporter.copyAsPlainText() },
-    { id: 'export.copyMd', title: 'Copy as Markdown', run: () => exporter.copyAsMarkdown() },
+    { id: 'export.copyMd', title: 'Copy as Markdown', shortcut: kb('export.copyMd'), run: () => exporter.copyAsMarkdown() },
     { id: 'export.copyImage', title: 'Copy as Image (PNG)', run: () => exporter.copyAsImage() },
 
     {
       id: 'daily.openToday',
       title: "Open Today's Daily Note",
-      shortcut: 'Ctrl+D',
+      shortcut: kb('daily.openToday'),
       hint: 'Create / open today\'s note in the workspace daily folder',
       run: () => daily.openTodayNote(),
     },
@@ -497,7 +665,7 @@ export function useCommands(): Command[] {
     {
       id: 'help.markdown',
       title: 'Markdown Cheatsheet',
-      shortcut: 'F1 / Ctrl+/',
+      shortcut: kb('help.markdown'),
       hint: 'Quick reference for Markdown syntax',
       run: () => {
         // Triggered via App-level event since useCommands has no DOM access.
@@ -507,7 +675,7 @@ export function useCommands(): Command[] {
     {
       id: 'view.slideshow',
       title: 'Present Slideshow',
-      shortcut: 'Ctrl+Alt+P',
+      shortcut: kb('view.slideshow'),
       hint: 'Render the active document as a fullscreen slideshow (split on `---`)',
       run: async () => {
         const t = tabs.activeTab;
@@ -542,19 +710,13 @@ export function useCommands(): Command[] {
     {
       id: 'window.new',
       title: 'New Window',
-      shortcut: 'Ctrl+Shift+N',
+      shortcut: kb('window.new'),
       run: async () => {
-        const label = `solomd-${Date.now()}`;
         try {
-          const win = new WebviewWindow(label, {
-            url: '/',
-            title: 'SoloMD',
-            width: 1000,
-            height: 700,
-          });
-          win.once('tauri://error', (e) => console.error('window error', e));
+          await openNewWindow();
         } catch (e) {
           console.error('failed to create window', e);
+          toasts.warning('Failed to open a new window');
         }
       },
     },
@@ -575,7 +737,7 @@ export function useCommands(): Command[] {
     {
       id: 'inbox.organizeAndAdvance',
       title: 'Inbox: Mark Organized & Advance',
-      shortcut: 'Ctrl+E',
+      shortcut: kb('inbox.organizeAndAdvance'),
       hint: 'Set `inbox: false` on the active note and jump to the next inbox note',
       run: () => {
         if (!settings.inboxWorkflowEnabled) {
@@ -588,8 +750,20 @@ export function useCommands(): Command[] {
   ];
 
   // App Store builds strip AI / Agent commands (Apple 3.1.1).
-  if (IS_APP_STORE_BUILD) {
-    return all.filter((c) => c.id !== 'view.toggleAgentPanel');
+  const built = IS_APP_STORE_BUILD
+    ? all.filter((c) => c.id !== 'view.toggleAgentPanel')
+    : all;
+
+  // #230 — Android has no libgit2, so every `history.*` / `sync.*` entry would
+  // resolve to a `Command … not found`. Keep them out of the palette entirely
+  // rather than letting the user find a command that can only fail.
+  // Quick capture is a desktop window opened by an OS-level hotkey; neither
+  // half exists on a phone, so the command would only ever fail there.
+  const desktopOnly = isMobile() ? built.filter((c) => c.id !== 'capture.quick') : built;
+  if (!hasGitBackend()) {
+    return desktopOnly.filter(
+      (c) => !c.id.startsWith('history.') && !c.id.startsWith('sync.'),
+    );
   }
-  return all;
+  return desktopOnly;
 }

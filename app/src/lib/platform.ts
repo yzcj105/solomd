@@ -22,6 +22,28 @@ export function isAndroid(): boolean {
 }
 
 /**
+ * True when the Rust side actually exposes the libgit2-backed commands.
+ *
+ * #230 — `git2` is gated to `cfg(not(target_os = "android"))` in Cargo.toml
+ * (vendored OpenSSL doesn't cross-compile into the Android NDK build), so the
+ * whole `github_sync` / `git_history` / `recipe_runner` command surface is
+ * compiled out of the Android binary. The frontend used to render those panels
+ * anyway and every call came back as `Command github_has_token not found`.
+ *
+ * Anything that invokes one of those commands must check this first.
+ *
+ * `?forceNoGit` is a dev-only QA hook (same idea as `?forcePlain` /
+ * `?forceWinChrome`) so the Android degradation can be driven from a desktop
+ * dev build instead of needing an APK on a device.
+ */
+export function hasGitBackend(): boolean {
+  if (typeof location !== 'undefined' && location.search.includes('forceNoGit')) {
+    return false;
+  }
+  return !isAndroid();
+}
+
+/**
  * True when running on a macOS desktop WebView (not iOS / iPadOS).
  *
  * We only want this to gate the unified-titlebar treatment: on macOS the
@@ -45,6 +67,26 @@ export function isMobile(): boolean {
   return isIOS() || /Android/i.test(ua);
 }
 
+/**
+ * True on a Windows desktop WebView — gates the frameless unified title bar
+ * (custom window controls + in-app menubar in Toolbar.vue). The Windows build
+ * ships `decorations: false` (tauri.windows.conf.json), so this must match
+ * exactly the builds that are actually frameless: real Windows, desktop only.
+ *
+ * `?forceWinChrome` is a dev-only QA hook (same idea as `?forcePlain`) to
+ * preview the Windows toolbar layout in the macOS dev build — it renders the
+ * menubar + caption buttons but the window itself keeps its platform chrome.
+ */
+export function isWindowsDesktop(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  if (isMobile()) return false;
+  return /Windows NT/.test(navigator.userAgent || '');
+}
+
+export function forceWinChromePreview(): boolean {
+  return typeof location !== 'undefined' && location.search.includes('forceWinChrome');
+}
+
 /** Windows desktop editor detection, including the forcePlain QA hook. */
 export function isWindowsEditorRuntime(): boolean {
   return (
@@ -53,15 +95,42 @@ export function isWindowsEditorRuntime(): boolean {
   );
 }
 
+/** Which editor Windows uses: the native textarea or CodeMirror (#328, #344). */
+export type WindowsEditorEngine = 'native' | 'codemirror';
+
 /**
  * Windows falls back to the native textarea for reliable CJK IME input, but
  * Vim is a CodeMirror extension and therefore requires the CodeMirror editor.
- * Keep this decision pure so the Windows/Vim hand-off can be regression tested
+ * The user can also pick CodeMirror outright (Settings → Editor engine) for
+ * syntax highlighting and the non-jumping live edit, without Vim keys.
+ * Keep this decision pure so the Windows hand-off can be regression tested
  * without booting a platform WebView.
  */
 export function shouldUsePlainWindowsEditor(
   windowsRuntime: boolean,
   vimMode: boolean,
+  engine: WindowsEditorEngine = 'native',
 ): boolean {
-  return windowsRuntime && !vimMode;
+  return windowsRuntime && !vimMode && engine !== 'codemirror';
+}
+
+/**
+ * Which keyboard convention modal dialogs follow (#357).
+ *
+ * macOS: Return = default button, Esc / ⌘. = Cancel, ⌘D = Don’t Save, ⌘S =
+ * Save, and no access-key decoration on the labels. Everywhere else (Windows /
+ * Linux): underlined access keys, Alt+letter or the bare letter while the
+ * dialog has focus, Enter activates the focused button.
+ *
+ * `?forceDialogKeys=win` / `?forceDialogKeys=mac` is a dev-only QA hook (same
+ * idea as `?forcePlain` / `?forceWinChrome`) so both conventions can be driven
+ * from one dev build. `?forceWinChrome` implies the Windows convention too.
+ */
+export function usesMacDialogKeys(): boolean {
+  if (typeof location !== 'undefined') {
+    const q = location.search;
+    if (q.includes('forceDialogKeys=mac')) return true;
+    if (q.includes('forceDialogKeys=win') || q.includes('forceWinChrome')) return false;
+  }
+  return isMacOS() || isIOS();
 }

@@ -35,22 +35,121 @@ use tauri::{AppHandle, Emitter};
 use super::agent_run::{RunHandle, RunKind, TraceStep};
 use super::agent_tools;
 use super::ai_keystore;
+use super::ollama as ollama_addr;
 use super::pricing;
 
 // ---------------------------------------------------------------------------
 // Provider aliases
 // ---------------------------------------------------------------------------
 
-/// Resolve a provider id to its canonical form. Today the only alias is
-/// `local` → `ollama`, introduced for v4.0 Recipes (P2): YAML files written
-/// by hand often say `provider: local`, which is more intuitive than the
-/// brand name. Both ai-providers.ts and the Recipe loader call this helper
-/// so the aliasing lives in exactly one place.
+/// Resolve a provider id to its canonical form. `local` → `ollama` was the
+/// first alias, introduced for v4.0 Recipes (P2): YAML files written by
+/// hand often say `provider: local`, which is more intuitive than the brand
+/// name. v4.11.18 adds the runtime names people actually type for a
+/// self-hosted OpenAI-compatible server. Both ai-providers.ts and the
+/// Recipe loader call this helper so the aliasing lives in one place.
 pub fn resolve_provider(id: &str) -> &str {
     match id {
         "local" => "ollama",
+        "llama" | "llama-cpp" | "llamacpp" | "llama.cpp" | "lmstudio" | "lm-studio" | "vllm"
+        | "custom" | "openai-compatible" => "openai-compat",
         other => other,
     }
+}
+
+/// Providers with no account behind them: a local Ollama, or a self-hosted
+/// OpenAI-compatible server (llama.cpp's `llama-server`, LM Studio, vLLM,
+/// Ollama's own `/v1` shim …). A key is still *allowed* — people do put a
+/// reverse proxy with a token in front — but never required, and we don't
+/// send an `Authorization` header when there isn't one.
+pub fn is_keyless_provider(provider: &str) -> bool {
+    matches!(resolve_provider(provider), "ollama" | "openai-compat")
+}
+
+/// The wire protocol for a provider/format id. `openai-compat` is a
+/// *provider*, not a protocol — it speaks plain OpenAI Chat Completions —
+/// so callers that omit `api_format` still reach the right runner.
+fn wire_format(format: &str) -> String {
+    match resolve_provider(format) {
+        "openai-compat" => "openai".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Attach `Authorization: Bearer …` only when we actually have a key.
+/// llama-server rejects nothing, but some servers 401 on an empty bearer
+/// rather than ignoring it, so sending `Bearer ` was worse than nothing.
+fn with_optional_bearer(rb: reqwest::RequestBuilder, key: &str) -> reqwest::RequestBuilder {
+    if key.trim().is_empty() {
+        rb
+    } else {
+        rb.bearer_auth(key)
+    }
+}
+
+/// Clean up a user-typed OpenAI-compatible base URL.
+///
+/// The convention (same as the OpenAI SDK) is that the base already carries
+/// the version path — `/v1`, `/api/v3`, `/v1beta/openai` — and we append
+/// `/chat/completions`. That convention silently 404s for the one address
+/// people paste most often: the bare `http://192.168.1.20:8080` that
+/// llama.cpp / LM Studio / vLLM print on startup. So:
+///
+///   * empty / whitespace-only → `None` (caller falls back to its default)
+///   * no scheme → `http://` for a host:port / IP / localhost, else `https://`
+///   * trailing `/` → dropped
+///   * no path at all → `/v1` appended (an existing path is left alone, so
+///     `/api/v3` and `/v1beta/openai` still work)
+pub fn normalize_openai_base(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let has_scheme = trimmed.contains("://");
+    let after_scheme = if has_scheme {
+        trimmed.splitn(2, "://").nth(1).unwrap_or("")
+    } else {
+        trimmed
+    };
+    let host = after_scheme.split('/').next().unwrap_or("");
+    let host_only = host.rsplit('@').next().unwrap_or(host);
+    let hostname = if let Some(rest) = host_only.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host_only.split(':').next().unwrap_or("")
+    };
+    let looks_local = hostname == "localhost"
+        || hostname.ends_with(".local")
+        || hostname.parse::<std::net::IpAddr>().is_ok();
+    let with_scheme = if has_scheme {
+        trimmed.to_string()
+    } else if looks_local || host_only.contains(':') {
+        format!("http://{trimmed}")
+    } else {
+        format!("https://{trimmed}")
+    };
+    // Does anything follow the host? If not, the server is expecting the
+    // version prefix we'd otherwise skip.
+    let path = with_scheme
+        .splitn(2, "://")
+        .nth(1)
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(_, p)| p.trim_matches('/').to_string())
+        .unwrap_or_default();
+    let out = if path.is_empty() {
+        format!("{}/v1", with_scheme.trim_end_matches('/'))
+    } else {
+        with_scheme.trim_end_matches('/').to_string()
+    };
+    Some(out)
+}
+
+/// The OpenAI-compatible base URL to use: the caller's, normalized, or
+/// OpenAI's own endpoint.
+fn openai_base(base_url: Option<&str>) -> String {
+    base_url
+        .and_then(normalize_openai_base)
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +378,39 @@ fn drop_cancel_flag(id: &str) {
 // command wrappers below just prime the config dir (so the file backend can
 // resolve its path) and delegate.
 
+/// One-token chat completion, used to verify an OpenAI-compatible endpoint
+/// that doesn't serve `GET /models` (#261). Returns the endpoint's own error
+/// text on failure so the UI can show it verbatim.
+async fn openai_chat_ping(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+    model: Option<&str>,
+) -> Result<String, String> {
+    let model = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| "no /models list and no model name configured to test with".to_string())?;
+    let url = format!("{base}/chat/completions");
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}]
+    });
+    let res = with_optional_bearer(client.post(&url), key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("network: {e}"))?;
+    let status = res.status();
+    if status.is_success() {
+        Ok(format!("OK · {model} responded (endpoint has no /models list)"))
+    } else {
+        let txt = res.text().await.unwrap_or_default();
+        Err(format!("chat ping HTTP {status}: {}", truncate(&txt, 200)))
+    }
+}
+
 /// Make a minimal call to the provider to confirm the key + base_url work.
 /// Returns Ok with a short message (e.g. model count) on success, Err with
 /// a human-readable reason on failure. Used by AISettings to show a green
@@ -289,10 +421,18 @@ pub async fn ai_verify_key(
     key: Option<String>,
     api_format: Option<String>,
     base_url: Option<String>,
+    // Model for the chat-ping fallback when the endpoint has no
+    // `GET /models`. Optional — callers that don't know one yet just get
+    // the original error back.
+    model: Option<String>,
 ) -> Result<String, String> {
-    let format = api_format.unwrap_or_else(|| provider.clone());
+    let format = wire_format(&api_format.unwrap_or_else(|| provider.clone()));
     let key_str = match key {
         Some(k) if !k.trim().is_empty() => k,
+        // A keyless provider (local Ollama / self-hosted OpenAI-compatible
+        // server) verifies fine with no key at all — don't fail the probe
+        // just because the keychain has nothing for it.
+        _ if is_keyless_provider(&provider) => read_key(&provider).unwrap_or_default(),
         _ => match read_key(&provider) {
             Ok(k) => k,
             Err(e) => return Err(e),
@@ -304,13 +444,9 @@ pub async fn ai_verify_key(
         .map_err(|e| e.to_string())?;
     match format.as_str() {
         "openai" => {
-            let base = base_url
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            let url = format!("{}/models", base.trim_end_matches('/'));
-            let res = client
-                .get(&url)
-                .bearer_auth(&key_str)
+            let base = openai_base(base_url.as_deref());
+            let url = format!("{base}/models");
+            let res = with_optional_bearer(client.get(&url), &key_str)
                 .send()
                 .await
                 .map_err(|e| format!("network: {e}"))?;
@@ -322,10 +458,28 @@ pub async fn ai_verify_key(
                     .and_then(|d| d.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
-                Ok(format!("OK · {n} models available"))
-            } else {
-                let txt = res.text().await.unwrap_or_default();
-                Err(format!("HTTP {status}: {}", truncate(&txt, 200)))
+                return Ok(format!("OK · {n} models available"));
+            }
+            let txt = res.text().await.unwrap_or_default();
+            // 401/403 is the endpoint telling us the key is wrong. That IS
+            // a verification failure — don't paper over it with a ping that
+            // would fail the same way.
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                return Err(format!("HTTP {status}: {}", truncate(&txt, 200)));
+            }
+            // #261 — `GET /models` is optional in practice. Corporate
+            // gateways and some self-hosted runtimes 404 it while chat
+            // completions work fine, and refusing to verify left those
+            // users unable to finish setup. Ask the endpoint the question
+            // that actually matters instead.
+            match openai_chat_ping(&client, &base, &key_str, model.as_deref()).await {
+                Ok(msg) => Ok(msg),
+                Err(ping_err) => Err(format!(
+                    "HTTP {status}: {} · {ping_err}",
+                    truncate(&txt, 200)
+                )),
             }
         }
         "anthropic" => {
@@ -353,10 +507,10 @@ pub async fn ai_verify_key(
             }
         }
         "ollama" => {
-            let base = base_url
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
-            let url = format!("{}/api/tags", base.trim_end_matches('/'));
+            // Same normalization the detect probe uses, so a LAN address
+            // typed without a scheme ("192.168.1.20:11434") verifies too.
+            let base = ollama_addr::base_url(base_url.as_deref());
+            let url = format!("{base}/api/tags");
             let res = client
                 .get(&url)
                 .send()
@@ -385,6 +539,106 @@ fn truncate(s: &str, n: usize) -> String {
         let mut out: String = s.chars().take(n).collect();
         out.push('…');
         out
+    }
+}
+
+/// Result of probing an OpenAI-compatible server's `/models` endpoint.
+///
+/// Mirrors `ollama::Detection` so AI Settings can render one status pill for
+/// both local runtimes. Unlike `ai_verify_key` this never returns `Err` —
+/// the failure text rides along in `error` so the panel can show *why*
+/// ("HTTP 404", "connection refused") instead of a bare red dot. That
+/// message is the whole point: a self-hosted server that "似乎不成功" is
+/// almost always a wrong path or a wrong port, and the user can't tell
+/// which without seeing the server's own answer.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ModelProbe {
+    pub ok: bool,
+    pub models: Vec<String>,
+    /// The address actually probed, after normalization — so the user can
+    /// see that `192.168.1.20:8080` became `http://192.168.1.20:8080/v1`.
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `GET {base}/models` against an OpenAI-compatible server and return the
+/// model ids it advertises. Used by the AI Settings connection pill for
+/// self-hosted servers (llama.cpp, LM Studio, vLLM, Ollama's /v1 shim);
+/// hosted providers use `ai_verify_key` instead, which checks the key.
+#[tauri::command]
+pub async fn ai_list_models(provider: String, base_url: Option<String>) -> ModelProbe {
+    let base = openai_base(base_url.as_deref());
+    let url = format!("{base}/models");
+    let key = read_key(&provider).unwrap_or_default();
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .connect_timeout(Duration::from_secs(6))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return ModelProbe {
+                url,
+                error: Some(e.to_string()),
+                ..Default::default()
+            }
+        }
+    };
+
+    let resp = match with_optional_bearer(client.get(&url), &key).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return ModelProbe {
+                url,
+                error: Some(format!("{e}")),
+                ..Default::default()
+            }
+        }
+    };
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return ModelProbe {
+            url,
+            error: Some(format!("HTTP {status}: {}", truncate(&txt, 160))),
+            ..Default::default()
+        };
+    }
+    let json: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            return ModelProbe {
+                url,
+                error: Some(format!("bad JSON: {e}")),
+                ..Default::default()
+            }
+        }
+    };
+    // OpenAI shape is `{ "data": [ { "id": "..." } ] }`; a few forks answer
+    // with a bare array. Accept both.
+    let arr = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| json.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let models = arr
+        .iter()
+        .filter_map(|m| {
+            m.get("id")
+                .and_then(|v| v.as_str())
+                .or_else(|| m.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect::<Vec<_>>();
+
+    ModelProbe {
+        ok: true,
+        models,
+        url,
+        error: None,
     }
 }
 
@@ -468,13 +722,19 @@ pub async fn ai_chat(app: AppHandle, request: ChatRequest) -> Result<String, Str
         .unwrap_or_else(make_request_id);
     let cancel = register_cancel_flag(&request_id);
 
-    let format = request
-        .api_format
-        .clone()
-        .unwrap_or_else(|| request.provider.clone());
+    let format = wire_format(
+        &request
+            .api_format
+            .clone()
+            .unwrap_or_else(|| request.provider.clone()),
+    );
 
+    // Ollama and self-hosted OpenAI-compatible servers have no account
+    // behind them: an absent key is the normal case, not a failure.
     let api_key = if format == "ollama" {
         String::new()
+    } else if is_keyless_provider(&request.provider) {
+        read_key(&request.provider).unwrap_or_default()
     } else {
         match read_key(&request.provider) {
             Ok(k) => k,
@@ -652,15 +912,19 @@ pub async fn ai_rewrite(app: AppHandle, request: RewriteRequest) -> Result<Strin
     // frontend, or the legacy `provider` value as a fallback. Apply the
     // `local` → `ollama` alias here too so Recipes (v4.0 P2) that say
     // `provider: local` work without a separate code path.
-    let format = request
-        .api_format
-        .clone()
-        .map(|f| resolve_provider(&f).to_string())
-        .unwrap_or_else(|| resolve_provider(&request.provider).to_string());
+    let format = wire_format(
+        &request
+            .api_format
+            .clone()
+            .unwrap_or_else(|| request.provider.clone()),
+    );
 
-    // Ollama doesn't need a key — every other format does.
+    // Ollama and self-hosted OpenAI-compatible servers don't need a key —
+    // every hosted provider does.
     let api_key = if format == "ollama" {
         String::new()
+    } else if is_keyless_provider(&request.provider) {
+        read_key(&request.provider).unwrap_or_default()
     } else {
         match read_key(&request.provider) {
             Ok(k) => k,
@@ -751,12 +1015,7 @@ async fn run_openai(
     api_key: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let base = req
-        .base_url
-        .as_ref()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let base = openai_base(req.base_url.as_deref());
     // Convention: base URL already includes the version path (`/v1`,
     // `/api/v3`, `/v1beta/openai`, etc.) — same as the OpenAI SDK default.
     // The Rust side just appends `/chat/completions`.
@@ -772,9 +1031,7 @@ async fn run_openai(
     });
 
     let client = http_client()?;
-    let resp = client
-        .post(&url)
-        .bearer_auth(api_key)
+    let resp = with_optional_bearer(client.post(&url), api_key)
         .header("content-type", "application/json")
         .json(&body)
         .send()
@@ -848,12 +1105,7 @@ async fn run_chat_openai(
     api_key: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let base = req
-        .base_url
-        .as_ref()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let base = openai_base(req.base_url.as_deref());
     let url = format!("{base}/chat/completions");
 
     let messages_json: Vec<serde_json::Value> = req
@@ -869,9 +1121,7 @@ async fn run_chat_openai(
     });
 
     let client = http_client()?;
-    let resp = client
-        .post(&url)
-        .bearer_auth(api_key)
+    let resp = with_optional_bearer(client.post(&url), api_key)
         .header("content-type", "application/json")
         .json(&body)
         .send()
@@ -1175,12 +1425,7 @@ async fn run_ollama(
     req: &RewriteRequest,
     cancel: Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let base = req
-        .base_url
-        .as_ref()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let base = ollama_addr::base_url(req.base_url.as_deref());
     let url = format!("{base}/api/chat");
 
     let body = serde_json::json!({
@@ -1254,12 +1499,7 @@ pub async fn run_chat_ollama(
     req: &ChatRequest,
     cancel: Arc<AtomicBool>,
 ) -> Result<(String, u64, u64), String> {
-    let base = req
-        .base_url
-        .as_ref()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let base = ollama_addr::base_url(req.base_url.as_deref());
     let url = format!("{base}/api/chat");
 
     let messages_json: Vec<serde_json::Value> = req
@@ -1382,8 +1622,16 @@ struct TurnOutcome {
 /// tool list. Strips write-tools when `allow_write` is false.
 fn build_anthropic_tools(req: &ChatRequest) -> Value {
     let allow_write = req.allow_write.unwrap_or(false);
+    // #247 — the default set has to follow `allow_write`. It used to be
+    // READ_TOOLS unconditionally, and the filter below can only *remove*
+    // entries, never add one — so `write_note` / `append_to_note` were never
+    // offered to the model no matter what the Agent-panel toggle said. The
+    // chat panel sends `tools: null`, which is exactly this branch; recipes
+    // pass an explicit list and so were unaffected, which is why writing
+    // worked there and only there.
     let names: Vec<String> = match &req.tools {
         Some(v) => v.clone(),
+        None if allow_write => agent_tools::all_tools().iter().map(|s| s.to_string()).collect(),
         None => agent_tools::READ_TOOLS.iter().map(|s| s.to_string()).collect(),
     };
     let arr: Vec<Value> = names
@@ -1406,8 +1654,16 @@ fn build_anthropic_tools(req: &ChatRequest) -> Value {
 /// `{"type":"function","function":{...}}`.
 fn build_openai_tools(req: &ChatRequest) -> Value {
     let allow_write = req.allow_write.unwrap_or(false);
+    // #247 — the default set has to follow `allow_write`. It used to be
+    // READ_TOOLS unconditionally, and the filter below can only *remove*
+    // entries, never add one — so `write_note` / `append_to_note` were never
+    // offered to the model no matter what the Agent-panel toggle said. The
+    // chat panel sends `tools: null`, which is exactly this branch; recipes
+    // pass an explicit list and so were unaffected, which is why writing
+    // worked there and only there.
     let names: Vec<String> = match &req.tools {
         Some(v) => v.clone(),
+        None if allow_write => agent_tools::all_tools().iter().map(|s| s.to_string()).collect(),
         None => agent_tools::READ_TOOLS.iter().map(|s| s.to_string()).collect(),
     };
     let arr: Vec<Value> = names
@@ -2117,12 +2373,7 @@ async fn openai_one_turn(
     tools: &Value,
     cancel: Arc<AtomicBool>,
 ) -> Result<TurnOutcome, String> {
-    let base = req
-        .base_url
-        .as_ref()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let base = openai_base(req.base_url.as_deref());
     let url = format!("{base}/chat/completions");
 
     // Bug O: build the body, omitting `stream_options` if a previous
@@ -2156,9 +2407,7 @@ async fn openai_one_turn(
         let api_key = api_key.to_string();
         let client = client.clone();
         async move {
-            client
-                .post(&url)
-                .bearer_auth(&api_key)
+            with_optional_bearer(client.post(&url), &api_key)
                 .header("content-type", "application/json")
                 .json(&body)
                 .send()
@@ -2397,6 +2646,128 @@ fn find_event_boundary(buf: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    /// #247 — the Agent panel sends `tools: null` and relies on `allow_write`
+    /// to decide the default set. It used to always start from READ_TOOLS,
+    /// and the filter can only remove, so the write tools were unreachable
+    /// from the chat panel however the toggle was set.
+    fn req_with(allow_write: Option<bool>, tools: Option<Vec<String>>) -> super::ChatRequest {
+        super::ChatRequest {
+            provider: "openai".into(),
+            api_format: None,
+            model: "m".into(),
+            messages: vec![],
+            base_url: None,
+            tools,
+            allow_write,
+            run_id: None,
+            workspace: None,
+            tool_loop_cap: None,
+            request_id: None,
+        }
+    }
+
+    #[test]
+    fn normalize_openai_base_appends_the_version_path_only_when_missing() {
+        // The address llama.cpp / LM Studio / vLLM print on startup.
+        assert_eq!(
+            super::normalize_openai_base("http://192.168.1.20:8080").as_deref(),
+            Some("http://192.168.1.20:8080/v1"),
+        );
+        assert_eq!(
+            super::normalize_openai_base("192.168.1.20:8080").as_deref(),
+            Some("http://192.168.1.20:8080/v1"),
+        );
+        assert_eq!(
+            super::normalize_openai_base("localhost:1234/v1/").as_deref(),
+            Some("http://localhost:1234/v1"),
+        );
+        // An explicit path is the caller's business — never rewritten.
+        assert_eq!(
+            super::normalize_openai_base("https://api.example.com/api/v3").as_deref(),
+            Some("https://api.example.com/api/v3"),
+        );
+        assert_eq!(
+            super::normalize_openai_base(
+                "https://generativelanguage.googleapis.com/v1beta/openai"
+            )
+            .as_deref(),
+            Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        );
+        // A bare public hostname is https; a bare host:port / IP is http.
+        assert_eq!(
+            super::normalize_openai_base("api.example.com").as_deref(),
+            Some("https://api.example.com/v1"),
+        );
+        assert_eq!(super::normalize_openai_base("   "), None);
+    }
+
+    #[test]
+    fn openai_compat_is_keyless_and_speaks_the_openai_wire_format() {
+        assert!(super::is_keyless_provider("openai-compat"));
+        assert!(super::is_keyless_provider("ollama"));
+        assert!(super::is_keyless_provider("llama-cpp"));
+        assert!(!super::is_keyless_provider("openai"));
+        assert!(!super::is_keyless_provider("deepseek"));
+
+        assert_eq!(super::resolve_provider("lmstudio"), "openai-compat");
+        assert_eq!(super::resolve_provider("vllm"), "openai-compat");
+        assert_eq!(super::resolve_provider("llama.cpp"), "openai-compat");
+        // A provider id with no `api_format` still lands on the right runner.
+        assert_eq!(super::wire_format("openai-compat"), "openai");
+        assert_eq!(super::wire_format("lmstudio"), "openai");
+        assert_eq!(super::wire_format("anthropic"), "anthropic");
+    }
+
+    fn tool_names(v: &serde_json::Value) -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| {
+                        t.get("function")
+                            .and_then(|f| f.get("name"))
+                            .or_else(|| t.get("name"))
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn write_tools_are_offered_when_allow_write_is_on() {
+        for build in [super::build_openai_tools, super::build_anthropic_tools] {
+            let names = tool_names(&build(&req_with(Some(true), None)));
+            assert!(
+                names.iter().any(|n| n == "write_note"),
+                "write_note must be offered when allow_write is true, got {names:?}"
+            );
+            assert!(
+                names.iter().any(|n| n == "read_note"),
+                "read tools must still be present, got {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn write_tools_stay_hidden_when_allow_write_is_off() {
+        for build in [super::build_openai_tools, super::build_anthropic_tools] {
+            let names = tool_names(&build(&req_with(Some(false), None)));
+            assert!(
+                !names.iter().any(|n| n == "write_note" || n == "append_to_note"),
+                "no write tool may leak when allow_write is false, got {names:?}"
+            );
+            assert!(!names.is_empty(), "read tools must still be offered");
+        }
+    }
+
+    #[test]
+    fn an_explicit_tool_list_is_still_filtered_by_allow_write() {
+        let explicit = Some(vec!["read_note".to_string(), "write_note".to_string()]);
+        let names = tool_names(&super::build_openai_tools(&req_with(Some(false), explicit)));
+        assert_eq!(names, vec!["read_note".to_string()]);
+    }
+
     use super::*;
 
     #[test]
@@ -2465,5 +2836,98 @@ mod tests {
         assert!(!stream_options_unsupported(&key));
         mark_stream_options_unsupported(&key);
         assert!(stream_options_unsupported(&key));
+    }
+
+    // ---- #261: verifying an endpoint with no GET /models -----------------
+    //
+    // Corporate gateways and some self-hosted runtimes 404 `/models` while
+    // chat completions work fine. Verification used to hard-fail there,
+    // which left those users unable to finish setup.
+
+    /// Minimal OpenAI-ish endpoint: answers `/models` with `models_status`
+    /// and `/chat/completions` with `chat_status`, routing on the path.
+    async fn serve_openai_ish(models_status: u16, chat_status: u16) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for _ in 0..8 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = [0u8; 2048];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let is_chat = req.contains("/chat/completions");
+                let (status, body) = if is_chat {
+                    (
+                        chat_status,
+                        r#"{"choices":[{"message":{"role":"assistant","content":"pong"}}]}"#,
+                    )
+                } else {
+                    (models_status, r#"{"data":[{"id":"m1"},{"id":"m2"}]}"#)
+                };
+                let body = if status >= 400 {
+                    r#"{"error":{"message":"Resource not found"}}"#
+                } else {
+                    body
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(resp.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        addr
+    }
+
+    async fn verify_against(addr: std::net::SocketAddr, model: Option<&str>) -> Result<String, String> {
+        super::ai_verify_key(
+            "openai-compat".into(),
+            Some("k".into()),
+            Some("openai".into()),
+            Some(format!("http://{addr}/v1")),
+            model.map(|m| m.to_string()),
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn models_list_is_used_when_the_endpoint_serves_one() {
+        let addr = serve_openai_ish(200, 200).await;
+        let out = verify_against(addr, Some("m1")).await.expect("should verify");
+        assert!(out.contains("2 models"), "got {out}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn missing_models_endpoint_falls_back_to_a_chat_ping() {
+        let addr = serve_openai_ish(404, 200).await;
+        let out = verify_against(addr, Some("my-model")).await.expect("should verify via ping");
+        assert!(out.contains("my-model"), "got {out}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bad_key_is_still_a_failure_and_skips_the_ping() {
+        let addr = serve_openai_ish(401, 200).await;
+        let err = verify_against(addr, Some("m1")).await.expect_err("401 must fail");
+        assert!(err.contains("401"), "got {err}");
+        // The ping would have succeeded here; a 401 must not be masked by it.
+        assert!(!err.contains("responded"), "got {err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn both_failing_reports_both_errors() {
+        let addr = serve_openai_ish(404, 400).await;
+        let err = verify_against(addr, Some("m1")).await.expect_err("should fail");
+        assert!(err.contains("404") && err.contains("400"), "got {err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_model_configured_reports_why_it_could_not_ping() {
+        let addr = serve_openai_ish(404, 200).await;
+        let err = verify_against(addr, None).await.expect_err("should fail");
+        assert!(err.contains("no model name"), "got {err}");
     }
 }

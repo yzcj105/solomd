@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import mermaid from 'mermaid';
+import { initMermaid } from '../lib/mermaid-lazy';
+import { mermaidThemeFor } from '../lib/themes';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { renderMarkdown, extractImageRoot } from '../lib/markdown';
 import { plantumlSvgUrl } from '../lib/plantuml';
@@ -15,7 +16,8 @@ import { useSettingsStore } from '../stores/settings';
 import { useTabsStore } from '../stores/tabs';
 import { useFiles } from '../composables/useFiles';
 import PreviewSearch from './PreviewSearch.vue';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { attachCodeCopyButtons as attachSharedCodeCopyButtons } from '../lib/code-copy';
+import { writePngToClipboard } from '../lib/image-clipboard';
 
 const props = withDefaults(
   defineProps<{
@@ -38,6 +40,9 @@ const props = withDefaults(
   }>(),
   { skin: 'default' },
 );
+// #350 — source line of the block at the top of the preview, so the outline
+// can follow the reading position in preview mode.
+const emit = defineEmits<{ (e: 'topline', line: number): void }>();
 const settings = useSettingsStore();
 const tabs = useTabsStore();
 const files = useFiles();
@@ -135,7 +140,6 @@ function onMathKeydown(e: KeyboardEvent) {
 
 let mermaidIdSeq = 0;
 
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 
 const html = computed(() => {
   // #141 — establish a reactive dep on the hard-breaks toggle so flipping the
@@ -145,6 +149,8 @@ const html = computed(() => {
   // Same reactive-dep trick for the numbered-heading toggle (preprocessMarkdown
   // reads a module-level flag that isn't reactive on its own).
   void settings.markdownAutoNumberHeadings;
+  // #216 — and for the smart-quotes toggle (md singleton rule state).
+  void settings.smartQuotes;
   const source = props.source || '';
   return rewriteImageUrls(renderMarkdown(source), extractImageRoot(source), props.filePath);
 });
@@ -183,6 +189,12 @@ function processPlantuml() {
 async function processMermaid() {
   if (!host.value) return;
   const blocks = host.value.querySelectorAll('pre > code.language-mermaid');
+  if (!blocks.length) return;   // a note without diagrams never loads mermaid
+  const mermaid = await initMermaid({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: mermaidThemeFor(settings.theme),
+  });
   for (const block of Array.from(blocks)) {
     const pre = block.parentElement as HTMLElement | null;
     if (!pre || pre.dataset.rendered === '1') continue;
@@ -192,6 +204,8 @@ async function processMermaid() {
       const { svg } = await mermaid.render(id, code);
       const wrap = document.createElement('div');
       wrap.className = 'mermaid-block';
+      // Keep the source so a theme switch can re-render this diagram.
+      wrap.dataset.mermaidSource = code;
       wrap.innerHTML = svg;
       pre.replaceWith(wrap);
     } catch (e) {
@@ -274,12 +288,23 @@ async function processWhiteboards() {
   }
 }
 
-watch(
-  () => settings.theme,
-  (t) => {
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: t === 'dark' ? 'dark' : 'default' });
+// The theme is applied by processMermaid on each render pass. Diagrams already
+// on screen were drawn for the old theme and processMermaid skips them, so put
+// their source back as a fence first and let it render them again (#354).
+// A note with no diagrams still never loads the renderer.
+watch(() => settings.theme, () => {
+  if (host.value) {
+    for (const wrap of Array.from(host.value.querySelectorAll<HTMLElement>('.mermaid-block[data-mermaid-source]'))) {
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.className = 'language-mermaid';
+      code.textContent = wrap.dataset.mermaidSource ?? '';
+      pre.appendChild(code);
+      wrap.replaceWith(pre);
+    }
   }
-);
+  void processMermaid();
+});
 
 function overlayStrings(): OverlayStrings {
   return {
@@ -335,41 +360,15 @@ function attachImageOverlayHandlers() {
   }
 }
 
-// #195 — fenced code blocks get a stable, one-click copy affordance. Keep the
-// button outside <pre> so it stays pinned while long code scrolls horizontally,
-// and copy textContent so syntax-highlight spans and optional line numbers are
-// never included in the clipboard payload.
+// #195 — fenced code blocks get a stable, one-click copy affordance. The
+// implementation lives in lib/code-copy.ts so the live-edit editor and the
+// Windows plain-block editor render the exact same button (v4.11.18).
 function attachCodeCopyButtons() {
   if (!host.value) return;
-  const blocks = host.value.querySelectorAll<HTMLElement>('pre > code');
-  for (const code of Array.from(blocks)) {
-    const pre = code.parentElement as HTMLElement | null;
-    if (!pre || pre.parentElement?.classList.contains('code-block-shell')) continue;
-
-    const shell = document.createElement('div');
-    shell.className = 'code-block-shell';
-    pre.replaceWith(shell);
-    shell.appendChild(pre);
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'code-copy-button';
-    button.textContent = t('toolbar.copy');
-    button.title = t('toolbar.copy');
-    button.setAttribute('aria-label', t('toolbar.copy'));
-    button.addEventListener('click', async () => {
-      try {
-        await writeText(code.textContent || '');
-        button.textContent = '✓';
-        window.setTimeout(() => {
-          if (button.isConnected) button.textContent = t('toolbar.copy');
-        }, 1200);
-      } catch (err) {
-        useToastsStore().error(`Copy failed: ${err}`);
-      }
-    });
-    shell.appendChild(button);
-  }
+  attachSharedCodeCopyButtons(host.value, {
+    label: t('toolbar.copy'),
+    onError: (err) => useToastsStore().error(`Copy failed: ${err}`),
+  });
 }
 
 // ── #162: single-diagram PNG export / copy ──────────────────────────
@@ -400,17 +399,9 @@ async function copyDiagramPng(svg: SVGElement) {
   const toasts = useToastsStore();
   try {
     const blob = await svgToPngBlob(svg, { scale: 2, background: diagramBackground() });
-    try {
-      const item = new ClipboardItem({ 'image/png': blob });
-      await navigator.clipboard.write([item]);
-    } catch {
-      // WKWebView denies navigator.clipboard outside a user gesture /
-      // focused document — same fallback as useExport.copyAsImage.
-      const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager');
-      const { Image } = await import('@tauri-apps/api/image');
-      const img = await Image.fromBytes(new Uint8Array(await blob.arrayBuffer()));
-      await writeImage(img);
-    }
+    // Shared with the editor's "Copy image" (#362): Tauri plugin first, then
+    // the browser Clipboard API.
+    await writePngToClipboard(blob);
     toasts.success(t('overlay.copyImage') + ' ✓');
   } catch (err) {
     toasts.error(`Copy failed: ${err}`);
@@ -580,8 +571,48 @@ function scrollToLine(line: number) {
     }
   }
   const target = nodes[best];
-  const offset = target.offsetTop - 8;
-  container.scrollTo({ top: offset, behavior: 'smooth' });
+  // #350 — measure against the scroll container itself. `offsetTop` is
+  // relative to the offsetParent, and .preview-host is not positioned, so it
+  // also counted the pane chrome above the preview: every jump overshot by
+  // that much and the heading ended up hidden above the top edge.
+  const delta = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  container.scrollTo({ top: Math.max(0, container.scrollTop + delta - TOP_GAP), behavior: 'smooth' });
+  flashTarget(target);
+  emit('topline', Number(target.getAttribute('data-source-line') || line));
+}
+
+/** Breathing room kept above a jumped-to block. */
+const TOP_GAP = 8;
+
+/** Briefly mark the block an outline jump landed on (#350). */
+function flashTarget(el: HTMLElement) {
+  el.classList.remove('preview-flash');
+  // Force a reflow so re-triggering on the same element restarts the animation.
+  void el.offsetWidth;
+  el.classList.add('preview-flash');
+  window.setTimeout(() => el.classList.remove('preview-flash'), 1300);
+}
+
+// #350 — in preview mode the outline highlights the heading at the top of the
+// preview, not the editor cursor (which does not move while reading). Emits
+// the source line of the last block whose top is at/above the viewport top
+// (plus the jump gap), at most once per frame.
+let toplineRaf = 0;
+function onHostScroll() {
+  if (toplineRaf) return;
+  toplineRaf = requestAnimationFrame(() => {
+    toplineRaf = 0;
+    const article = host.value;
+    const container = article?.parentElement as HTMLElement | null;
+    if (!article || !container) return;
+    const limit = container.getBoundingClientRect().top + TOP_GAP + 2;
+    let line = 0;
+    for (const el of Array.from(article.querySelectorAll<HTMLElement>('[data-source-line]'))) {
+      if (el.getBoundingClientRect().top > limit) break;
+      line = Number(el.getAttribute('data-source-line') || 0) || line;
+    }
+    emit('topline', line || 1);
+  });
 }
 
 // #189 — copying rendered content into mail clients / rich editors dropped
@@ -621,7 +652,7 @@ defineExpose({ scrollToLine, openSearch });
 </script>
 
 <template>
-  <div class="preview-host" :class="{ 'preview-host--reading': skin === 'reading' }" @copy="onPreviewCopy">
+  <div class="preview-host" :class="{ 'preview-host--reading': skin === 'reading' }" @copy="onPreviewCopy" @scroll.passive="onHostScroll">
     <PreviewSearch
       v-if="searchOpen && host"
       ref="searchRef"
@@ -677,6 +708,14 @@ defineExpose({ scrollToLine, openSearch });
   on equal-or-higher specificity.
 -->
 <style>
+.preview-content .preview-flash {
+  animation: preview-flash 1.2s ease-out;
+  border-radius: 4px;
+}
+@keyframes preview-flash {
+  0%, 25% { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { background: transparent; }
+}
 .preview-host {
   height: 100%;
   overflow: auto;
@@ -698,6 +737,16 @@ defineExpose({ scrollToLine, openSearch });
      via the `--content-font-size` CSS custom property set in App.vue. */
   font-size: var(--content-font-size, 15px);
   line-height: 1.7;
+  /* #293 — prose must never push past the column. Text pasted out of Word, a
+     web page or a chat transcript often joins its words with NO-BREAK SPACE
+     (U+00A0) instead of U+0020; the reporter's file had 119 of them against 23
+     real spaces. A run glued together that way is one unbreakable "word" to the
+     layout engine, so without this the paragraph simply overflows to the right
+     and is clipped (on paper) or needs horizontal scrolling (on screen). Live
+     edit looked fine throughout because CodeMirror's line-wrapping already
+     carries its own overflow-wrap. `break-word` only splits runs that cannot
+     fit on a line of their own, so ordinary text still breaks at its spaces. */
+  overflow-wrap: break-word;
 }
 .preview-content--fit {
   max-width: none;
@@ -742,38 +791,9 @@ defineExpose({ scrollToLine, openSearch });
   border-radius: 6px;
   overflow-x: auto;
 }
-.code-block-shell {
-  position: relative;
-  margin: 1em 0;
-}
-.code-block-shell > pre {
-  margin: 0;
-  padding-right: 80px;
-}
-.code-copy-button {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  right: 8px;
-  min-width: 48px;
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  color: var(--text-muted);
-  font: 12px/1 var(--font-ui);
-  cursor: pointer;
-  opacity: 0.78;
-  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
-}
-.code-copy-button:hover,
-.code-copy-button:focus-visible {
-  opacity: 1;
-  color: var(--accent);
-  border-color: var(--accent);
-  outline: none;
-}
+/* #195 / v4.11.18 — the copy-button chrome now lives in styles/main.css so
+ * the preview pane, the Windows plain-block live editor and the CodeMirror
+ * live-edit mode all render the identical affordance. */
 :where(.preview-content) pre code {
   font-family: var(--font-mono);
   background: transparent;
@@ -812,6 +832,15 @@ defineExpose({ scrollToLine, openSearch });
   padding-left: 3.4em;
   position: relative;
   white-space: pre;
+}
+/* #211 — code-block-wrap wins over line numbers: long numbered lines soft-wrap
+ * (hanging under the gutter) instead of overflowing. Without this, `.cb-line`'s
+ * `white-space: pre` above shadows `.cb-wrap-on pre` whenever both toggles are
+ * on. Same override mirrored in Editor.vue for the live-edit blocks. */
+.preview-content.cb-wrap-on.cb-numbered-on pre.cb-numbered code .cb-line {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .preview-content.cb-numbered-on pre.cb-numbered code .cb-line::before {
   content: counter(cb-line);
@@ -981,7 +1010,12 @@ defineExpose({ scrollToLine, openSearch });
   background: var(--bg);
 }
 .preview-content--reading {
-  --font-reading:
+  /* Gitee IK9BBG — a face the user chose wins over the built-in serif stack.
+     It has to be var()'s fallback argument, not a comma-separated sibling:
+     an undefined `var(--x)` makes the whole declaration invalid, which would
+     drop reading mode's serif for everyone who hasn't set a font. */
+  --font-reading: var(
+    --content-font-user,
     Charter,
     "Iowan Old Style",
     "Source Serif Pro",
@@ -991,7 +1025,8 @@ defineExpose({ scrollToLine, openSearch });
     "Liberation Serif",
     "Noto Serif",
     Georgia,
-    serif;
+    serif
+  );
   /* v4.10 #165 — reading column follows the same width setting as the
      preview pane (720px was the old hardcoded serif column). */
   max-width: var(--preview-max-width, 720px);

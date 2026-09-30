@@ -7,6 +7,9 @@ import { useTilesStore } from '../stores/tiles';
 import { useCommands } from './useCommands';
 import { useInbox } from './useInbox';
 import { usePomodoroStore, getLastPreset } from '../stores/pomodoro';
+import { eventToCombo, resolveBindings } from '../lib/keybindings';
+import { FORMAT_KINDS, type FormatKind } from '../lib/md-format';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 interface Hooks {
   openPalette?: () => void;
@@ -36,6 +39,24 @@ export function useShortcuts(hooks: Hooks = {}) {
     if (cmd) cmd.run();
   }
 
+  /**
+   * #296 — formatting only means something while typing in a Markdown
+   * document. Anywhere else (the find bar, a settings field, a .txt tab) the
+   * chord is declined so it keeps whatever it does natively — ⌘I in a text
+   * field should not silently edit the note behind the dialog.
+   */
+  function formatMarkdown(kind: FormatKind): boolean | void {
+    if (tabs.activeTab?.language !== 'markdown') return false;
+    const el = document.activeElement as HTMLElement | null;
+    // The find bars live *inside* the editor hosts, so match the editing
+    // surface itself, not its container.
+    const inEditor = !!el?.closest('.cm-content, textarea.plain-editor, textarea.plain-block__textarea');
+    const inField = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    if (inField && !inEditor) return false;
+    if (settings.viewMode === 'preview' || settings.viewMode === 'reading') return false;
+    window.dispatchEvent(new CustomEvent('solomd:format-markdown', { detail: { kind } }));
+  }
+
   /** #106 — cycle the focused pane to the previous/next tab in the bar.
    *  Routes through tiles.setActiveTab so the pane's activeTabId stays in
    *  lock-step with tabs.activeId (the same path a click takes). Wraps
@@ -48,186 +69,117 @@ export function useShortcuts(hooks: Hooks = {}) {
     tiles.setActiveTab(tiles.focusedPaneId, list[idx].id);
   }
 
-  function handler(e: KeyboardEvent) {
-    // F1 (no modifier) opens markdown help
-    if (e.key === 'F1') {
-      e.preventDefault();
-      hooks.openHelp?.();
-      return;
-    }
-
-    const mod = e.ctrlKey || e.metaKey;
-    if (!mod) return;
-    const k = e.key.toLowerCase();
-
-    // Ctrl+,  (settings)
-    if (e.key === ',') {
-      e.preventDefault();
-      hooks.openSettings?.();
-      return;
-    }
-
-    // Ctrl+/  (help)
-    if (e.key === '/') {
-      e.preventDefault();
-      hooks.openHelp?.();
-      return;
-    }
-
-    if (k === 'n' && e.shiftKey) {
-      e.preventDefault();
-      runById('window.new');
-    } else if (k === 'n' && e.altKey) {
-      e.preventDefault();
-      files.newTextFile();
-    } else if (k === 'n') {
-      e.preventDefault();
-      files.newFile();
-    } else if (k === 'o' && e.shiftKey) {
-      e.preventDefault();
-      runById('view.toggleOutline');
-    } else if (k === 'o') {
-      e.preventDefault();
-      files.openFile();
-    } else if (k === 'c' && e.shiftKey) {
-      e.preventDefault();
-      exporter.copyAsHtml();
-    } else if (k === 's' && e.shiftKey) {
-      e.preventDefault();
-      files.saveActiveAs();
-    } else if (k === 's') {
-      e.preventDefault();
-      files.saveActive();
-    } else if (k === 'w') {
-      e.preventDefault();
+  /**
+   * #180 — what each bindable action does. The table in `lib/keybindings.ts`
+   * owns which chord reaches which id; this owns what the id means, keeping
+   * the conditional behaviours (search mode, inbox workflow, preview-only
+   * find) exactly where they were before the shortcuts became rebindable.
+   *
+   * Returning `false` means "not handled" — the event keeps its default, so
+   * ⌘F in a non-preview pane still reaches CodeMirror's own find.
+   */
+  const actions: Record<string, () => boolean | void> = {
+    'file.new': () => void files.newFile(),
+    'file.newText': () => void files.newTextFile(),
+    'file.newInFolder': () => runById('file.newInFolder'),
+    'file.open': () => void files.openFile(),
+    'file.import': () => void files.importDocuments(),
+    'file.save': () => void files.saveActive(),
+    'file.saveAs': () => void files.saveActiveAs(),
+    'file.closeTab': () => {
       if (tabs.activeId) files.closeTabSafe(tabs.activeId);
-    } else if (k === 't' && !e.shiftKey && !e.altKey) {
-      // v2.4.2: ⌘T mirrors Chrome / Obsidian "new tab" muscle memory.
-      // Same effect as ⌘N — both create a fresh markdown tab.
-      e.preventDefault();
-      files.newFile();
-    } else if (k === 'p' && e.shiftKey && e.altKey) {
-      // v2.5: PDF-print moved to ⌘⌥⇧P so plain ⌘P can host the new
-      // VSCode-style quick file switcher (#1 v2.5 feature).
-      e.preventDefault();
-      runById('export.pdfPrint');
-    } else if (k === 'p' && e.shiftKey) {
-      e.preventDefault();
-      settings.cycleViewMode();
-    } else if (k === 'p' && e.altKey) {
-      e.preventDefault();
-      runById('view.slideshow');
-    } else if (k === 'p') {
-      // v2.5: ⌘P opens the quick file switcher (VSCode-style).
-      e.preventDefault();
-      hooks.openQuickSwitcher?.();
-    } else if (k === 'r' && e.shiftKey) {
-      // v2.4: Cmd/Ctrl+Shift+R toggles reading mode. Pressing the same
-      // combo while already in reading mode restores the previous mode.
-      e.preventDefault();
-      settings.toggleReadingMode();
-    } else if (k === 'k' && e.shiftKey) {
-      e.preventDefault();
-      hooks.openPalette?.();
-    } else if (k === 'i' && e.shiftKey) {
-      // v4.6 F1: ⌘⇧I toggles the Properties inspector (frontmatter editor).
-      e.preventDefault();
-      settings.toggleInspector();
-    } else if (k === 'j' && e.shiftKey) {
-      // v2.5 F6: ⌘⇧J — CJK proofread panel. Shift differentiates from
-      // ⌘J (CodeMirror "AI rewrite", bound inside the editor keymap).
-      e.preventDefault();
-      hooks.openCjkProofread?.();
-    } else if (k === 'f' && e.shiftKey) {
-      e.preventDefault();
-      // v2.3: ⌘⇧F prefers semantic search when the user has opted in;
-      // otherwise we keep the legacy keyword search behaviour so muscle
-      // memory carries over.
-      if (settings.ragEnabled) {
-        hooks.openRagSearch?.();
-      } else {
-        hooks.openGlobalSearch?.();
-      }
-    } else if (k === 'f' && !e.shiftKey) {
-      if (settings.viewMode === 'preview' && tabs.activeTab?.language === 'markdown') {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent('solomd:preview-search', {
-          detail: { paneId: tiles.focusedPaneId },
-        }));
-      }
-    } else if (k === 'b' && !e.altKey) {
-      e.preventDefault();
-      settings.toggleFileTree();
-    } else if (k === 'b' && e.altKey) {
-      // ⌥⌘B mirrors ⌘B on the right side: hide / show the Outline /
-      // Backlinks / Tags / History / Agent panel strip wholesale.
-      e.preventDefault();
-      settings.toggleRightSidebar();
-    } else if (k === 'l' && e.altKey) {
-      e.preventDefault();
-      runById('format.markdown');
-    } else if (k === 'd' && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      runById('daily.openToday');
-    } else if (k === 'e' && !e.shiftKey && !e.altKey) {
-      // v2.4: ⌘E toggles `inbox: true|false` in the active doc's front matter.
-      // v4.6 F6: route through organizeAndAdvance — inside the inbox context
-      // (InboxView open / inbox filter on) with auto-advance enabled this
-      // marks the note organized and jumps to the next inbox note; everywhere
-      // else it degrades to the plain toggle. Disabled entirely when the
-      // workflow is opted out.
-      e.preventDefault();
-      if (settings.inboxWorkflowEnabled) {
-        void inbox.organizeAndAdvance();
-      } else {
-        inbox.toggleActive();
-      }
-    } else if (k === 'z' && e.shiftKey && !e.altKey) {
-      // v2.5 F4: ⌘⇧Z = "Zen" — start the last-used preset (or the
-      // settings default if no last-used). If a session is already
-      // running this is a no-op so the shortcut doesn't accidentally
-      // restart and lose the in-progress writing window.
-      e.preventDefault();
-      if (!pomodoro.active) {
-        const last = getLastPreset();
-        const min = Number.isFinite(last) && last > 0 ? last : settings.pomodoroDefaultMinutes;
-        pomodoro.start(min, { notify: true });
-      }
-    }
+    },
+    'file.openExternal': () => runById('file.openExternal'),
+    'window.new': () => runById('window.new'),
+    'file.exit': () => void getCurrentWindow().close(),
 
-    // #106 — ⌘[ / ⌘] cycle to the previous / next tab (Chrome/VSCode muscle
-    // memory). Matched on e.key so it's keyboard-layout precise.
-    if (e.key === '[') {
-      e.preventDefault();
-      activateTabByOffset(-1);
-      return;
-    }
-    if (e.key === ']') {
-      e.preventDefault();
-      activateTabByOffset(1);
-      return;
-    }
+    'editor.caseCycle': () => runById('editor.caseCycle'),
+    // #296 — one entry per kind, generated: the ids are `fmt.<kind>` on both
+    // sides, so a kind added to FORMAT_KINDS cannot be bound but unhandled.
+    ...Object.fromEntries(
+      FORMAT_KINDS.map((kind) => [`fmt.${kind}`, () => formatMarkdown(kind)]),
+    ),
+    'format.markdown': () => runById('format.markdown'),
+    'editor.tableEditor': () => runById('editor.tableEditor'),
+    'editor.formulaEditor': () => runById('editor.formulaEditor'),
+    'export.copyHtml': () => void exporter.copyAsHtml(),
+    // Markdown is what most people actually want to paste elsewhere (issues,
+    // chat, other editors), so it earns the second copy binding. Plain-text
+    // and PNG stay palette-only — they're one-off exports.
+    'export.copyMd': () => void exporter.copyAsMarkdown(),
+    'export.pdfPrint': () => runById('export.pdfPrint'),
 
-    // Tile layout shortcuts
-    if (e.key === '\\') {
-      e.preventDefault();
-      if (e.shiftKey) {
-        tiles.splitPane(tiles.focusedPaneId, 'vertical');
-      } else {
-        tiles.splitPane(tiles.focusedPaneId, 'horizontal');
-      }
-      return;
-    }
-    if (k === 'arrowright' && e.altKey) {
-      e.preventDefault();
-      tiles.focusNextPane();
-      return;
-    }
-    if (k === 'arrowleft' && e.altKey) {
-      e.preventDefault();
-      tiles.focusPrevPane();
-      return;
-    }
+    'view.cycleView': () => settings.cycleViewMode(),
+    'view.toggleLiveEdit': () => settings.toggleLiveEditSource(),
+    // Pressing the same combo while already in reading mode restores the
+    // previous mode.
+    'view.toggleReading': () => settings.toggleReadingMode(),
+    'view.toggleFileTree': () => settings.toggleFileTree(),
+    // Mirrors the file-tree toggle on the right: hides / shows the Outline /
+    // Backlinks / Tags / History / Agent strip wholesale.
+    'view.toggleRightSidebar': () => settings.toggleRightSidebar(),
+    'view.toggleOutline': () => runById('view.toggleOutline'),
+    'view.toggleInspector': () => settings.toggleInspector(),
+    'view.toggleToolbar': () => settings.toggleToolbarHidden(),
+    'view.slideshow': () => runById('view.slideshow'),
+    'fold.toggle': () => runById('fold.toggle'),
+    'fold.all': () => runById('fold.all'),
+    'fold.none': () => runById('fold.none'),
+
+    'palette.open': () => hooks.openPalette?.(),
+    'quickSwitcher.open': () => hooks.openQuickSwitcher?.(),
+    // Prefers semantic search when the user has opted in; otherwise keeps the
+    // keyword search so muscle memory carries over.
+    'search.global': () => {
+      if (settings.ragEnabled) hooks.openRagSearch?.();
+      else hooks.openGlobalSearch?.();
+    },
+    // Only the preview pane needs our own find; anywhere else the event must
+    // fall through to CodeMirror's.
+    'editor.find': () => {
+      if (settings.viewMode !== 'preview' || tabs.activeTab?.language !== 'markdown') return false;
+      window.dispatchEvent(
+        new CustomEvent('solomd:preview-search', { detail: { paneId: tiles.focusedPaneId } }),
+      );
+    },
+    'tab.prev': () => activateTabByOffset(-1),
+    'tab.next': () => activateTabByOffset(1),
+    'tile.splitRight': () => tiles.splitPane(tiles.focusedPaneId, 'horizontal'),
+    'tile.splitDown': () => tiles.splitPane(tiles.focusedPaneId, 'vertical'),
+    'tile.focusNext': () => tiles.focusNextPane(),
+    'tile.focusPrev': () => tiles.focusPrevPane(),
+
+    'settings.open': () => hooks.openSettings?.(),
+    'help.markdown': () => hooks.openHelp?.(),
+    'proofread.cjk': () => hooks.openCjkProofread?.(),
+    'daily.openToday': () => runById('daily.openToday'),
+    // v4.6 F6: inside the inbox context with auto-advance on, this marks the
+    // note organized and jumps to the next one; elsewhere it degrades to the
+    // plain front-matter toggle, and it's off entirely when opted out.
+    'inbox.toggle': () => {
+      if (settings.inboxWorkflowEnabled) void inbox.organizeAndAdvance();
+      else inbox.toggleActive();
+    },
+    // A no-op while a session runs, so the shortcut can't restart one and
+    // lose the writing window in progress.
+    'pomodoro.startLast': () => {
+      if (pomodoro.active) return;
+      const last = getLastPreset();
+      const min = Number.isFinite(last) && last > 0 ? last : settings.pomodoroDefaultMinutes;
+      pomodoro.start(min, { notify: true });
+    },
+  };
+
+  function handler(e: KeyboardEvent) {
+    const combo = eventToCombo(e);
+    if (!combo) return;
+    const bindings = resolveBindings(settings.keybindings);
+    const actionId = bindings.get(combo);
+    if (!actionId) return;
+    const run = actions[actionId];
+    if (!run) return;
+    if (run() === false) return; // action declined — leave the event alone
+    e.preventDefault();
   }
 
   onMounted(() => window.addEventListener('keydown', handler));

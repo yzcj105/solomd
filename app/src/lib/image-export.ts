@@ -9,8 +9,7 @@
 
 // html2pdf.js bundles html2canvas; we import it directly for image-only use.
 // @ts-ignore — no types
-import html2canvas from 'html2canvas';
-import mermaid from 'mermaid';
+import { initMermaid } from './mermaid-lazy';
 import { renderMarkdown, extractImageRoot } from './markdown';
 import { rewriteImageUrls } from './image-resolve';
 
@@ -77,6 +76,7 @@ const IMAGE_CSS = `
   .img-page ul, .img-page ol { padding-left: 1.8em; margin: .9em 0; }
   .img-page table { border-collapse: collapse; margin: 1.3em 0; width: 100%; font-size: .95em; }
   .img-page th, .img-page td { border: 1px solid #e6e2d8; padding: 7px 13px; text-align: left; }
+  .img-page .cell-nowrap { white-space: nowrap; }
   .img-page thead th { background: #ffe7cc; font-weight: 700; border-bottom: 2px solid #ff9f40; }
   .img-page hr { border: none; border-top: 1px solid #e6e2d8; margin: 2em 0; }
   .img-page img { max-width: 100%; border-radius: 6px; margin: 1em 0; }
@@ -104,8 +104,13 @@ const IMAGE_CSS = `
 let mermaidId = 0;
 
 async function processMermaidBlocks(container: HTMLElement) {
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
   const blocks = container.querySelectorAll('pre > code.language-mermaid');
+  if (!blocks.length) return;
+  const mermaid = await initMermaid({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'default',
+  });
   for (const block of Array.from(blocks)) {
     const pre = block.parentElement as HTMLElement | null;
     if (!pre) continue;
@@ -173,6 +178,7 @@ export async function markdownToImageBlob(
     // crop-to-content concern that change tried to address turned out
     // to be the forced footer + extra bottom padding, both of which are
     // already handled by the `imageExportBranding` toggle above.
+    const html2canvas = (await import('html2canvas')).default;
     const canvas = await html2canvas(page, {
       scale: 2,
       useCORS: true,

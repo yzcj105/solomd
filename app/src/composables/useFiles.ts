@@ -2,8 +2,9 @@ import { inject } from 'vue';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { documentDir, join } from '@tauri-apps/api/path';
-import { isIOS, isAndroid, isMobile } from '../lib/platform';
+import { documentDir, desktopDir, homeDir, join } from '@tauri-apps/api/path';
+import { isIOS, isAndroid, isWindowsDesktop } from '../lib/platform';
+import { isNarrowViewport } from './useViewport';
 import { useTabsStore } from '../stores/tabs';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useSettingsStore } from '../stores/settings';
@@ -15,6 +16,8 @@ import { openPath as openWithSystemDefault } from '@tauri-apps/plugin-opener';
 import { useI18n } from '../i18n';
 import type { FileReadResult, Tab } from '../types';
 import { isSafPath, fromSafPath, safRead, safWrite, safLaunchPicker } from '../lib/saf-fs';
+import { baseNameOf, fileNameOf, claimImportName, joinInFolder } from '../lib/import-plan';
+import { newFileDirFor, treeSelection } from '../lib/new-file-target';
 
 // Save dialogs only — opening uses no filter so any file is selectable.
 // (rfd treats `'*'` literally as the extension `*`, not as wildcard, so we
@@ -36,6 +39,11 @@ const SAVE_FILTERS = [
   { name: 'Plain Text', extensions: ['txt'] },
 ];
 
+// Source path → the unsaved tab its conversion opened (#356). Module-level:
+// every component calls useFiles() for its own instance, and the FileTree's
+// instance must see conversions started from anywhere.
+const convertedTabs = new Map<string, string>();
+
 export function useFiles() {
   const tabs = useTabsStore();
   const workspace = useWorkspaceStore();
@@ -54,7 +62,16 @@ export function useFiles() {
     try {
       const label = windowsStore.nextAuxLabel();
       const url = `/?path=${encodeURIComponent(path)}`;
-      new WebviewWindow(label, { url, title: 'SoloMD', width: 1000, height: 700 });
+      // Windows ships frameless (unified title bar; tauri.windows.conf.json
+      // only covers the main window) — aux windows must match or they'd get
+      // native chrome PLUS the in-app caption buttons Toolbar.vue renders.
+      new WebviewWindow(label, {
+        url,
+        title: 'SoloMD',
+        width: 1000,
+        height: 700,
+        decorations: !isWindowsDesktop(),
+      });
       windowsStore.register(label, { path, folder: workspace.currentFolder });
       return label;
     } catch (e) {
@@ -75,7 +92,10 @@ export function useFiles() {
     // No filters: rfd's filter behavior on macOS greys out non-matching files
     // and `'*'` is not treated as a wildcard. Letting the user pick anything
     // is simpler and more reliable.
-    const selected = await openDialog({ multiple: false });
+    const selected = await openDialog({
+      multiple: false,
+      defaultPath: await filePickerStartDir(),
+    });
     if (!selected || typeof selected !== 'string') return;
     await openPath(selected);
   }
@@ -194,7 +214,10 @@ export function useFiles() {
     return dest;
   }
 
-  async function openPath(path: string, opts: { bypassNewWindow?: boolean } = {}) {
+  async function openPath(
+    path: string,
+    opts: { bypassNewWindow?: boolean; fromTree?: boolean } = {},
+  ) {
     // #148 — see importContentUri; must run before any path parsing below.
     if (isAndroid() && path.startsWith('content://')) {
       try {
@@ -269,7 +292,12 @@ export function useFiles() {
     const ext = (path.split('.').pop() || '').toLowerCase();
 
     // If it's a convertible format, convert to Markdown first.
-    if (CONVERT_BUILTIN.has(ext) || CONVERT_CLI.has(ext)) {
+    // #356 — except an HTML file clicked in the file tree: that is a text
+    // file in the user's own folder (often one we just exported), and a click
+    // there means "open it", not "import it". Converting made a new unsaved
+    // .md tab on every click. File → Import still converts HTML.
+    const openHtmlAsText = opts.fromTree && (ext === 'html' || ext === 'htm');
+    if (!openHtmlAsText && (CONVERT_BUILTIN.has(ext) || CONVERT_CLI.has(ext))) {
       return openAndConvert(path, ext);
     }
 
@@ -308,12 +336,12 @@ export function useFiles() {
         hadBom: result.had_bom,
       });
       workspace.pushRecent(path);
-      // #148 (mobile) — a phone can't show the file tree and editor
-      // side-by-side (the doc becomes an unreadable sliver), so collapse the
-      // tree once a file opens; the editor gets the full width. The toolbar
-      // folder button reopens the tree to pick another file.
-      if (isMobile() && settings.showFileTree) settings.toggleFileTree();
-      const fileName = path.split(/[\\/]/).pop() ?? path;
+      // #148 / #168 — on a phone the tree is a drawer over the editor, so
+      // close it once a file opens: picking a file means you want to read it.
+      // Keyed off viewport width (not the UA) so a narrow desktop window
+      // behaves the same way the layout does.
+      if (isNarrowViewport() && settings.showFileTree) settings.toggleFileTree();
+      const fileName = fileNameOf(path);
       toasts.success(`Opened ${fileName}`);
     } catch (e) {
       console.error('open failed', e);
@@ -364,6 +392,13 @@ export function useFiles() {
 
   async function openAndConvert(path: string, ext: string) {
     const fileName = path.split(/[\\/]/).pop() ?? path;
+    // #356 — opening the same document again goes back to the tab its first
+    // conversion produced, instead of converting into yet another tab.
+    const prevId = convertedTabs.get(path);
+    if (prevId && tabs.tabs.some((x) => x.id === prevId)) {
+      tabs.activate(prevId);
+      return;
+    }
     const tid = toasts.info(`Converting ${fileName} to Markdown…`, 0);
     try {
       const markdown = await invoke<string>('convert_file_to_markdown', { path });
@@ -376,6 +411,7 @@ export function useFiles() {
         tab.content = markdown;
         tab.fileName = `${baseName}.md`;
         tab.language = 'markdown';
+        convertedTabs.set(path, tab.id);
       }
       toasts.success(`Converted ${fileName} → Markdown`);
     } catch (e) {
@@ -393,13 +429,199 @@ export function useFiles() {
     }
   }
 
+  /**
+   * Import documents — Word / PDF / HTML / spreadsheets / slides / EPUB — as
+   * Markdown files in the workspace.
+   *
+   * The converter has been in the app since v2.x, but the only way to reach it
+   * was to open or drag a non-Markdown file and get an unsaved tab back. That
+   * is fine for a one-off look and useless for the actual job, which is
+   * "I have a folder of Word documents and I want them in my notes": no
+   * multi-select, nothing written to disk, and no accounting of what failed.
+   *
+   * Converted files land in the workspace root as `<original name>.md`. That
+   * is a deliberate default rather than a picker — one more dialog per import
+   * for a location the user can change afterwards with a drag is not a trade
+   * worth making. Without a workspace open there is nowhere to write, so it
+   * falls back to the old behaviour and opens unsaved tabs.
+   */
+  async function importDocuments() {
+    const selected = await openDialog({
+      multiple: true,
+      defaultPath: await filePickerStartDir(),
+      filters: [
+        {
+          name: 'Documents',
+          extensions: [
+            'docx', 'pdf', 'html', 'htm', 'csv', 'xlsx', 'xls',
+            'pptx', 'epub', 'json', 'xml',
+          ],
+        },
+      ],
+    });
+    const paths = Array.isArray(selected)
+      ? selected
+      : typeof selected === 'string'
+        ? [selected]
+        : [];
+    if (!paths.length) return;
+
+    const folder = workspace.currentFolder;
+    // SAF vaults write through ContentResolver with document ids rather than
+    // paths; rather than half-support that here, Android imports open as tabs.
+    const writeToDisk = !!folder && !isSafPath(folder);
+
+    // One listing instead of an existence check per file: importing 40
+    // documents should not be 40 extra IPC round-trips.
+    const taken = new Set<string>();
+    if (writeToDisk) {
+      try {
+        const entries = await invoke<Array<{ name: string }>>('list_dir', { path: folder });
+        for (const e of entries) taken.add(e.name.toLowerCase());
+      } catch {
+        /* an unreadable folder will surface on the first write anyway */
+      }
+    }
+
+    const imported: string[] = [];
+    const failed: Array<{ name: string; error: string }> = [];
+    let needsMarkitdown = false;
+
+    for (let i = 0; i < paths.length; i++) {
+      const path = paths[i];
+      const fileName = fileNameOf(path);
+      // A sticky toast per file (timeout 0, dismissed in `finally`): converting
+      // a big PDF takes seconds, and an import that looks like nothing is
+      // happening is one the user starts again.
+      const progressId = toasts.info(
+        t('import.progress', { done: i + 1, total: paths.length, name: fileName }),
+        0,
+      );
+      try {
+        const markdown = await invoke<string>('convert_file_to_markdown', { path });
+        const base = baseNameOf(fileName);
+        if (writeToDisk) {
+          // `claimImportName` is where an existing note is protected — see
+          // import-plan.ts. It also reserves the name inside this batch, so
+          // importing two `report.*` files produces two notes.
+          const target = joinInFolder(folder!, claimImportName(taken, fileName));
+          await invoke('write_file', { path: target, content: markdown, encoding: 'UTF-8' });
+          imported.push(target);
+        } else {
+          tabs.newTab();
+          const tab = tabs.activeTab;
+          if (tab) {
+            tab.content = markdown;
+            tab.fileName = `${base}.md`;
+            tab.language = 'markdown';
+          }
+          imported.push(`${base}.md`);
+        }
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes('markitdown')) needsMarkitdown = true;
+        failed.push({ name: fileName, error: msg });
+      } finally {
+        toasts.dismiss(progressId);
+      }
+    }
+
+    if (imported.length && writeToDisk) {
+      window.dispatchEvent(new CustomEvent('solomd:saved', { detail: { filePath: imported[0] } }));
+      // Open the first import so the result is visible rather than merely
+      // reported — a summary toast alone leaves the user hunting in the tree.
+      await openPath(imported[0], { bypassNewWindow: true });
+    }
+
+    if (imported.length) {
+      toasts.success(
+        writeToDisk
+          ? t('import.done', { count: imported.length, folder: fileNameOf(folder!) })
+          : t('import.doneTabs', { count: imported.length }),
+        4000,
+      );
+    }
+    if (needsMarkitdown) {
+      toasts.warning(t('import.needsMarkitdown'), 9000);
+    }
+    if (failed.length) {
+      // Naming the files that failed matters more than the stack: the user
+      // needs to know which documents did not make it, and re-running an
+      // import is cheap.
+      toasts.error(
+        t('import.failed', {
+          count: failed.length,
+          names: failed.slice(0, 3).map((f) => f.name).join(', ') + (failed.length > 3 ? '…' : ''),
+        }),
+        8000,
+      );
+      console.warn('[import] failures', failed);
+    }
+  }
+
+  /** The starting folder handed to the OS folder picker.
+   *
+   *  Never let the picker open without one, and never hand it a path that is
+   *  not a real directory:
+   *
+   *  - Windows' picker falls back to the shell's *Desktop root* when it is
+   *    given no starting folder. That root is a namespace item, not a
+   *    directory — it has no filesystem path — so pressing OK on it makes the
+   *    shell answer "no object for moniker" (MK_E_UNAVAILABLE, zh: "没有供标
+   *    记使用的对象") and refuse to close the dialog. "Open Folder" then reads
+   *    as a dead button and the Desktop itself cannot be chosen.
+   *  - rfd silently drops a starting folder it cannot resolve
+   *    (`SHCreateItemFromParsingName` fails → `SetFolder` is skipped), so a
+   *    remembered workspace on a deleted / unmounted path lands the user in
+   *    exactly that virtual root.
+   *
+   *  A directory that exists keeps the dialog on the filesystem: the caller's
+   *  own candidates first (a remembered path, the active file's folder), then
+   *  the last workspace, else the Desktop (where the picker would have opened
+   *  anyway), else Documents, else the home folder. */
+  async function pickerStartDir(
+    ...preferred: Array<string | null | undefined>
+  ): Promise<string | undefined> {
+    const candidates = [
+      ...preferred,
+      workspace.currentFolder,
+      await desktopDir().catch(() => null),
+      await documentDir().catch(() => null),
+      await homeDir().catch(() => null),
+    ];
+    for (const c of candidates) {
+      if (!c) continue;
+      try {
+        // A SAF vault path ("saf:…") is not a filesystem path — skip it and
+        // let the next candidate win, same as a folder that has gone away.
+        if (await invoke<boolean>('fs_dir_exists', { path: c })) return c;
+      } catch {
+        /* path API unavailable — try the next candidate */
+      }
+    }
+    return undefined;
+  }
+
+  /** Directory a *file* picker should open in.
+   *
+   *  The active document's folder first — that is where the next file the user
+   *  reaches for almost always lives (an image next to the note, a sibling
+   *  chapter, the CSS for the theme you're editing) — then the chain above. */
+  async function filePickerStartDir(): Promise<string | undefined> {
+    const active = tabs.activeTab?.filePath;
+    const dir = active?.replace(/[\\/][^\\/]+$/, '');
+    return pickerStartDir(dir && dir !== active ? dir : null);
+  }
+
   async function openFolder() {
     // Open the OS folder picker rooted at the previously chosen workspace
     // so the user lands in a familiar tree, not at $HOME or wherever the
     // OS defaults. Without `defaultPath` Tauri's picker re-opens at the
     // OS-level last-used directory, which is unrelated to SoloMD state
     // and surprised users with a "why isn't my last folder remembered"
-    // bug. We persist `currentFolder` already; this just feeds it back.
+    // bug. We persist `currentFolder` already; this just feeds it back —
+    // via pickerStartDir(), which guarantees the folder it hands over
+    // actually exists (see there for why that matters on Windows).
     //
     // #96 fix: on Android, `openDialog({ directory: true })` resolves to
     // `null` silently — Tauri's dialog plugin doesn't surface SAF's
@@ -454,7 +676,7 @@ export function useFiles() {
     const selected = await openDialog({
       directory: true,
       multiple: false,
-      defaultPath: workspace.currentFolder ?? undefined,
+      defaultPath: await pickerStartDir(),
     });
     if (!selected || typeof selected !== 'string') return;
     workspace.setFolder(selected);
@@ -497,6 +719,12 @@ export function useFiles() {
   }
 
   async function saveTab(tab: Tab, opts: { silent?: boolean } = {}): Promise<boolean> {
+    // #222 — the CodeMirror editor syncs doc→tab.content on a 350ms debounce.
+    // A save issued inside that window (vim `:w`/`:wq`, a fast Ctrl+S) would
+    // read a stale document; for `:wq` the tab then closes and the tail of the
+    // edit is silently lost. Editors flush their pending sync synchronously on
+    // this event, so `tab.content` below is current.
+    window.dispatchEvent(new Event('solomd:flush-content-sync'));
     let path = tab.filePath;
     if (isIOS()) {
       // On iOS, never trust the existing path — it may have come from a
@@ -569,8 +797,17 @@ export function useFiles() {
       // straight to app Documents; user surfaces / moves via Files app.
       path = await iosResolvePath(tab);
     } else {
+      // A document with no path yet (File → New, the toolbar ＋, Ctrl+N) is
+      // being named for the first time: open the dialog in the folder the user
+      // is actually looking at — the Explorer's selection (a folder, or the
+      // folder of the selected file), else the open document's folder —
+      // instead of wherever the OS save dialog remembered last. An existing
+      // file keeps its own path, which is what "Save As" means.
+      const dir = tab.filePath
+        ? null
+        : await pickerStartDir(newFileDirFor(treeSelection(), tabs.activeTab?.filePath));
       path = await saveDialog({
-        defaultPath: tab.filePath ?? defaultName,
+        defaultPath: tab.filePath ?? (dir ? joinInFolder(dir, defaultName) : defaultName),
         filters: SAVE_FILTERS,
       });
       if (!path) return false;
@@ -650,6 +887,11 @@ export function useFiles() {
   async function closeTabSafe(id: string) {
     const tab = tabs.tabs.find((t) => t.id === id);
     if (!tab) return;
+    // #222 — same stale-window hazard as saveTab: the dirty check below reads
+    // tab.content, which lags the CodeMirror doc by up to 350ms. A close
+    // landing inside that window (vim `:q`, fast Ctrl+W) saw a clean tab and
+    // discarded the unsynced tail without the unsaved-changes dialog.
+    window.dispatchEvent(new Event('solomd:flush-content-sync'));
     const showUnsavedDialog = getUnsavedDialog();
     if (tab.content !== tab.savedContent && showUnsavedDialog) {
       const action = await showUnsavedDialog('tab', tab.fileName, 1);
@@ -668,11 +910,21 @@ export function useFiles() {
     newFile,
     newTextFile,
     openFile,
+    importDocuments,
     openPath,
     openLinkedFile,
     openFolder,
+    // Starting directories for the OS dialogs. Every picker needs one: an
+    // unset `defaultPath` is not "neutral" on Windows — it strands the dialog
+    // on the shell's virtual desktop root, which OK cannot return.
+    pickerStartDir,
+    filePickerStartDir,
     saveActive,
     saveActiveAs,
+    // Exposed for the task panel: ticking a checkbox in a file that happens to
+    // be open has to go through the tab, not straight to disk, or the tab's
+    // in-memory copy would silently overwrite it on the next save.
+    saveTab,
     autoSaveDirtyTabs,
     closeTabSafe,
     spawnAuxWindow,

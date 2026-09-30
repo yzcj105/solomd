@@ -4,11 +4,33 @@ import { invoke } from '@tauri-apps/api/core';
 import { writeText, writeHtml, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import { documentDir, join } from '@tauri-apps/api/path';
-import { isIOS } from '../lib/platform';
-import { markdownToDocxBlob } from '../lib/docx-export';
-import { markdownToPdfBlob } from '../lib/pdf-export';
-import { markdownToImageBlob } from '../lib/image-export';
+import { isIOS, isWindowsDesktop } from '../lib/platform';
+// Loaded per export rather than at startup. Between them these three pull in
+// `docx`, jsPDF + html2canvas and the mermaid renderer — megabytes that a user
+// who only opens a note to read it should never have to compile.
+const markdownToDocxBlob: typeof import('../lib/docx-export')['markdownToDocxBlob'] =
+  async (...args) => (await import('../lib/docx-export')).markdownToDocxBlob(...args);
+const markdownToPdfBlob: typeof import('../lib/pdf-export')['markdownToPdfBlob'] =
+  async (...args) => (await import('../lib/pdf-export')).markdownToPdfBlob(...args);
+const markdownToImageBlob: typeof import('../lib/image-export')['markdownToImageBlob'] =
+  async (...args) => (await import('../lib/image-export')).markdownToImageBlob(...args);
 import { renderMarkdown, extractImageRoot } from '../lib/markdown';
+// Tiny shim: the mermaid bundle itself stays behind a dynamic import inside
+// it, so touching this module costs nothing at startup.
+import { initMermaid } from '../lib/mermaid-lazy';
+// Lazy like the three above: it carries KaTeX's stylesheet as a string and
+// is only needed when a note is actually exported to HTML.
+const buildStandaloneHtml: typeof import('../lib/html-export')['buildStandaloneHtml'] =
+  async (...args) => (await import('../lib/html-export')).buildStandaloneHtml(...args);
+import { exportDefaultPath } from '../lib/export-paths';
+import { useI18n } from '../i18n';
+import { mountPrintOverlay } from '../lib/print-overlay';
+import {
+  decoratePrintToc,
+  fillTocPageNumbers,
+  printableBox,
+  withPrintPagination,
+} from '../lib/print-pages';
 import { rewriteLinkUrls, rewriteImageUrls } from '../lib/image-resolve';
 import { useTabsStore } from '../stores/tabs';
 import { useSettingsStore } from '../stores/settings';
@@ -18,152 +40,9 @@ import {
   resolvePdfOptions,
   userTouchedPdfDefaults,
   buildPrintStyle,
+  buildWindowsPrintFrameStyle,
+  withPdfToc,
 } from '../lib/pdf-options';
-
-const HTML_TEMPLATE = (title: string, body: string) => `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<style>
-  :root {
-    --brand: #ff9f40;
-    --brand-soft: #ffe7cc;
-    --ink: #1f1d1a;
-    --ink-muted: #6a6560;
-    --rule: #e6e2d8;
-    --paper: #fbfaf6;
-    --code-bg: #f3efe7;
-    --code-key: #ff9f40;
-    --row-alt: #f7f4ec;
-  }
-  html, body { background: var(--paper); }
-  body {
-    max-width: 760px;
-    margin: 56px auto;
-    padding: 0 56px 96px;
-    font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
-      "Helvetica Neue", Arial,
-      "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-      "Noto Sans CJK SC", "WenQuanYi Micro Hei",
-      system-ui, sans-serif;
-    color: var(--ink);
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-  h1, h2, h3, h4, h5, h6 {
-    line-height: 1.25;
-    font-weight: 700;
-    color: var(--ink);
-    margin: 2em 0 0.6em;
-  }
-  h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
-  h1 {
-    font-size: 2.15em;
-    border-bottom: 2px solid var(--brand);
-    padding-bottom: .35em;
-    letter-spacing: -0.01em;
-  }
-  h2 {
-    font-size: 1.55em;
-    border-bottom: 1px solid var(--rule);
-    padding-bottom: .25em;
-  }
-  h3 { font-size: 1.25em; }
-  h4 { font-size: 1.05em; }
-  h5, h6 { font-size: 1em; color: var(--ink-muted); }
-  p { margin: .9em 0; }
-  a {
-    color: var(--brand);
-    text-decoration: none;
-    border-bottom: 1px solid var(--brand-soft);
-  }
-  a:hover { border-bottom-color: var(--brand); }
-  strong { color: var(--ink); }
-  em { color: var(--ink); }
-  code {
-    font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas",
-      "Liberation Mono", monospace;
-    font-size: .9em;
-    background: var(--code-bg);
-    padding: .15em .45em;
-    border-radius: 4px;
-    color: #8a4a00;
-  }
-  pre {
-    background: var(--code-bg);
-    padding: 16px 20px;
-    border-radius: 8px;
-    overflow-x: auto;
-    margin: 1.2em 0;
-    line-height: 1.55;
-    border: 1px solid var(--rule);
-  }
-  pre code {
-    background: transparent;
-    padding: 0;
-    color: var(--ink);
-    font-size: .88em;
-  }
-  pre code .hljs-keyword,
-  pre code .hljs-built_in,
-  pre code .hljs-tag { color: var(--code-key); }
-  blockquote {
-    border-left: 4px solid var(--brand);
-    background: linear-gradient(to right, var(--brand-soft) 0%, transparent 40%);
-    margin: 1.4em 0;
-    padding: .5em 1.2em;
-    color: var(--ink-muted);
-    font-style: italic;
-    border-radius: 0 4px 4px 0;
-  }
-  blockquote p { margin: .4em 0; }
-  ul, ol { padding-left: 1.8em; margin: .9em 0; }
-  li { margin: .3em 0; }
-  li > p { margin: .3em 0; }
-  table {
-    border-collapse: collapse;
-    margin: 1.4em 0;
-    width: 100%;
-    font-size: .95em;
-  }
-  th, td {
-    border: 1px solid var(--rule);
-    padding: 8px 14px;
-    text-align: left;
-  }
-  thead th {
-    background: var(--brand-soft);
-    color: var(--ink);
-    font-weight: 700;
-    border-bottom: 2px solid var(--brand);
-  }
-  tbody tr:nth-child(even) { background: var(--row-alt); }
-  hr {
-    border: none;
-    border-top: 1px solid var(--rule);
-    margin: 2.4em 0;
-  }
-  img {
-    max-width: 100%;
-    border-radius: 6px;
-    margin: 1.2em 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
-  }
-  .katex-display { overflow-x: auto; overflow-y: hidden; margin: 1.2em 0; }
-</style>
-</head>
-<body>
-${body}
-</body>
-</html>`;
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c)
-  );
-}
 
 /** Strip Markdown syntax to produce plain prose. */
 function stripMarkdown(src: string): string {
@@ -325,10 +204,15 @@ function getEditorSelectionMd(content?: string): string | null {
   return text.trim() ? text : null;
 }
 
+// Mermaid ids must be unique per render across the whole session — mermaid
+// keys internal state off them and reusing one yields an empty diagram.
+let printMermaidId = 0;
+
 export function useExport() {
   const tabs = useTabsStore();
   const toasts = useToastsStore();
   const settings = useSettingsStore();
+  const { t } = useI18n();
 
   function activeOr(): { content: string; baseName: string; filePath?: string } | null {
     const tab = tabs.activeTab;
@@ -378,7 +262,11 @@ export function useExport() {
       const dir = await documentDir();
       return await join(dir, filename);
     }
-    return await saveDialog({ defaultPath: filename, filters });
+    // #260 — start in the document's own folder instead of wherever the
+    // last save happened. Falls back to a bare filename for unsaved
+    // buffers and virtual (SAF) paths, which is the old behaviour.
+    const defaultPath = exportDefaultPath(activeOr()?.filePath, filename) ?? filename;
+    return await saveDialog({ defaultPath, filters });
   }
 
   function iosSavedToast(filename: string): string {
@@ -402,20 +290,19 @@ export function useExport() {
     const filename = `${ctx.baseName}.html`;
     const path = await pickWritePath(filename, [{ name: 'HTML', extensions: ['html'] }]);
     if (!path) return;
-    // v4.3.0 issue #77 — rewrite local-file `href` / `src` URLs to
-    // absolute `file://` paths so the exported HTML doesn't bake in
-    // `http://tauri.localhost/...` references that break when shared.
-    const imageRoot = extractImageRoot(ctx.content);
-    const body = rewriteLinkUrls(
-      rewriteImageUrls(renderMarkdown(ctx.content), imageRoot, ctx.filePath),
-      imageRoot,
-      ctx.filePath,
-    );
-    const html = HTML_TEMPLATE(ctx.baseName, body);
+    const tid = toasts.info('Exporting HTML…', 0);
     try {
+      const html = await buildStandaloneHtml({
+        content: ctx.content,
+        title: ctx.baseName,
+        filePath: ctx.filePath,
+        plantumlServer: settings.plantumlEnabled ? settings.plantumlServer : null,
+      });
+      toasts.dismiss(tid);
       await invoke('write_file', { path, content: html, encoding: 'UTF-8' });
       toasts.success(isIOS() ? iosSavedToast(filename) : 'Exported to HTML');
     } catch (e) {
+      toasts.dismiss(tid);
       toasts.error(`Export failed: ${e}`);
     }
   }
@@ -428,7 +315,13 @@ export function useExport() {
     const path = await pickWritePath(filename, [{ name: 'Word Document', extensions: ['docx'] }]);
     if (!path) return;
     try {
-      const blob = await markdownToDocxBlob(ctx.content, ctx.baseName, ctx.filePath);
+      const blob = await markdownToDocxBlob(
+        ctx.content,
+        ctx.baseName,
+        ctx.filePath,
+        settings.docxPreset,
+        t('docx.contents'),
+      );
       const buffer = new Uint8Array(await blob.arrayBuffer());
       // Tauri 2 serializes Uint8Array as a number array which Rust accepts as Vec<u8>.
       await invoke('write_binary_file', { path, data: Array.from(buffer) });
@@ -467,6 +360,51 @@ export function useExport() {
   }
 
   /**
+   * #301 — render ```mermaid fences inside the print overlay.
+   *
+   * `renderMarkdown()` leaves a mermaid fence as a plain
+   * `<pre><code class="language-mermaid">` — the Preview pane and the image
+   * PDF path (`markdownToPdfBlob`) each turn that into an SVG afterwards, but
+   * the text PDF path never did, so "导出为 PDF（文字）" printed the diagram
+   * source verbatim. Same treatment as those two, and it must finish BEFORE
+   * the print dialog opens or the platform captures a half-rendered overlay.
+   *
+   * The `.mermaid-block` / `.mermaid-error` classes are the ones Preview's
+   * global `:where(.preview-content) …` rules target, and the overlay content
+   * div already carries `preview-content`, so the SVG is centered and
+   * width-clamped on paper without any extra CSS.
+   */
+  async function renderPrintMermaid(container: HTMLElement, dark: boolean) {
+    const blocks = container.querySelectorAll('pre > code.language-mermaid');
+    if (!blocks.length) return;   // no diagrams: never load the renderer
+    const mermaid = await initMermaid({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: dark ? 'dark' : 'default',
+    });
+    for (const block of Array.from(blocks)) {
+      const pre = block.parentElement as HTMLElement | null;
+      if (!pre) continue;
+      const code = (block.textContent || '').trim();
+      const id = `print-mmd-${++printMermaidId}`;
+      try {
+        const { svg } = await mermaid.render(id, code);
+        const wrap = document.createElement('div');
+        wrap.className = 'mermaid-block';
+        wrap.innerHTML = svg;
+        pre.replaceWith(wrap);
+      } catch (e) {
+        // A broken diagram must not abort the print — show the reason where
+        // the diagram would have been, exactly like the Preview pane does.
+        const err = document.createElement('pre');
+        err.className = 'mermaid-error';
+        err.textContent = `Mermaid error: ${(e as Error).message}`;
+        pre.replaceWith(err);
+      }
+    }
+  }
+
+  /**
    * Open the system print dialog with the rendered markdown.
    * Builds a hidden iframe with the same HTML template used for export,
    * Print: mount a print-only overlay with the rendered markdown, then ask
@@ -485,7 +423,14 @@ export function useExport() {
 
     // Strip YAML front matter before rendering — users don't want the
     // metadata block to show up in the printed output.
-    const source = ctx.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+    const pdfOpts = resolvePdfOptions(
+      settings.pdfDefaults,
+      ctx.content,
+      userTouchedPdfDefaults(settings.pdfDefaults),
+    );
+    const stripped = ctx.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+    // #347 — optional table-of-contents page (Settings → PDF, or `pdf: toc: true`).
+    const source = pdfOpts.toc ? withPdfToc(stripped) : stripped;
     // v4.3.0 issue #77 — same link/image rewriting as the file-export path,
     // so the print overlay (and therefore the resulting PDF from the system
     // print dialog) doesn't show `http://tauri.localhost/...` links.
@@ -496,43 +441,67 @@ export function useExport() {
       ctx.filePath,
     );
 
-    let overlay = document.getElementById('solomd-print-overlay') as HTMLDivElement | null;
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'solomd-print-overlay';
-      document.body.appendChild(overlay);
-    }
-    overlay.innerHTML = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<div class="solomd-print-content preview-content">${body}</div>`;
-    document.body.classList.add('solomd-printing');
+    // Print palette, independent of the app theme (see mountPrintOverlay).
+    const printTheme = settings.printTheme || 'light';
 
     // v2.5 F3: inject @page / @media print stylesheet derived from
     // Settings → PDF defaults + per-doc `pdf:` front matter override.
     // When the user has never touched Settings AND the doc has no
     // `pdf:` block, `buildPrintStyle` returns "" and we mirror
     // pre-v2.5 webview-default behavior.
-    const pdfOpts = resolvePdfOptions(
-      settings.pdfDefaults,
-      ctx.content,
-      userTouchedPdfDefaults(settings.pdfDefaults),
+    // #347 — on Windows, move the page margins into the overlay so Chromium's
+    // print headers/footers (date, title, URL) have nowhere to draw.
+    const printCss = [
+      buildPrintStyle(pdfOpts),
+      isWindowsDesktop() ? buildWindowsPrintFrameStyle(pdfOpts) : '',
+    ].filter(Boolean).join('\n');
+    const { overlay: printOverlay, content: printContent, cleanup } = mountPrintOverlay(
+      body,
+      printTheme,
+      printCss,
     );
-    const styleCss = buildPrintStyle(pdfOpts);
-    let styleEl: HTMLStyleElement | null = null;
-    if (styleCss) {
-      styleEl = document.createElement('style');
-      styleEl.id = 'solomd-print-style';
-      styleEl.textContent = styleCss;
-      document.head.appendChild(styleEl);
-    }
 
-    const cleanup = () => {
-      document.body.classList.remove('solomd-printing');
-      overlay?.remove();
-      styleEl?.remove();
-    };
+    // #301 — swap mermaid fences for SVGs and WAIT for them. This has to
+    // happen after the print-theme class is on the overlay (so the diagram
+    // palette matches the paper) and before `print_webview`, because the
+    // native print sheet snapshots the DOM as it finds it.
+    if (printContent) {
+      try {
+        await renderPrintMermaid(
+          printContent,
+          printTheme === 'dark' || (printTheme === 'follow' && settings.theme === 'dark'),
+        );
+      } catch (e) {
+        // Only reachable if the mermaid chunk itself fails to load (per-diagram
+        // failures are handled inside). Printing the document with the fences
+        // still as code beats refusing to print at all — and #115 says we must
+        // never leave the overlay + `body.solomd-printing` mounted.
+        console.error('[print] mermaid render failed', e);
+      }
+    }
 
     // Give KaTeX / images a tick to apply layout before print.
     await new Promise((r) => setTimeout(r, 200));
+
+    // #347 — the TOC page gets a title, and page numbers when the page size is
+    // known (Settings → PDF or `pdf:` front matter). Measured after mermaid
+    // and the layout tick above, since both change where pages break.
+    if (pdfOpts.toc && printContent) {
+      try {
+        const nav = decoratePrintToc(printContent, t('settings.pdfDefaults.tocTitle'));
+        const box = printableBox(pdfOpts.pageSizeMm, pdfOpts.marginMm);
+        if (nav && box) {
+          withPrintPagination(printOverlay, printContent, box, (p) =>
+            fillTocPageNumbers(nav, printContent, p.pageOf),
+          );
+        } else if (nav) {
+          fillTocPageNumbers(nav, printContent, null);
+        }
+      } catch (e) {
+        // Numbers are a nicety; a failure here must never stop the print.
+        console.error('[print] toc page numbers failed', e);
+      }
+    }
     try {
       await invoke('print_webview');
       // The native print sheet is modal; by the time invoke resolves,

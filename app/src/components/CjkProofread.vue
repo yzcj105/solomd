@@ -268,7 +268,7 @@ void lang;
   <div v-if="open" class="proof__backdrop" @click.self="emit('close')">
     <div class="proof" role="dialog" aria-label="CJK Proofread">
       <header class="proof__head">
-        <h2 class="proof__title">中 {{ t('proofread.heading') }}</h2>
+        <h2 class="proof__title">{{ t('proofread.heading') }}</h2>
         <div class="proof__counts">
           <span class="proof__pill proof__pill--high">
             {{ t('proofread.severityHigh') }} · {{ counts.high }}

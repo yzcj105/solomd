@@ -39,7 +39,12 @@ const HIDDEN_MARK_NODES = new Set<string>([
 
 const hideDeco = Decoration.replace({});
 
-const liveMarkdownPlugin = ViewPlugin.fromClass(
+// #353 "Always show Markdown markers": nothing is hidden or replaced, so the
+// rendered styling (heading size, bold) stays and no line reflows when the
+// caret moves. Markers are dimmed so they read as syntax, not text.
+const markerMark = Decoration.mark({ class: 'cm-md-marker' });
+
+const makeLiveMarkdownPlugin = (showMarkers: boolean) => ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
 
@@ -64,7 +69,7 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
         this.decorations = this.build(update.view);
         return;
       }
-      if (update.selectionSet && !isDragging(update.state)) {
+      if (!showMarkers && update.selectionSet && !isDragging(update.state)) {
         this.decorations = this.build(update.view);
       }
     }
@@ -87,6 +92,10 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
             const onCaretLine = line >= fromLine && line <= toLine;
 
             if (HIDDEN_MARK_NODES.has(name)) {
+              if (showMarkers) {
+                if (node.to > node.from) builder.add(node.from, node.to, markerMark);
+                return;
+              }
               if (onCaretLine) return;
               // v4.3.5 #83 — gulp the single trailing space after the ATX
               // marker so H1..H6 text aligns at the same visual column. Each
@@ -110,7 +119,7 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
             // is consistent: a heading that renders shouldn't sit above a bullet
             // list that doesn't.
             if (name === 'ListMark') {
-              if (onCaretLine || node.to <= node.from) return;
+              if (showMarkers || onCaretLine || node.to <= node.from) return;
               const mark = view.state.doc.sliceString(node.from, node.to);
               const isBullet = mark === '-' || mark === '*' || mark === '+';
               if (!isBullet) return; // ordered list keeps its number
@@ -126,7 +135,7 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
               return;
             }
             if (name === 'HorizontalRule') {
-              if (onCaretLine || node.to <= node.from) return;
+              if (showMarkers || onCaretLine || node.to <= node.from) return;
               builder.add(node.from, node.to, hrDeco);
               return;
             }
@@ -185,6 +194,11 @@ const liveTheme = EditorView.theme({
   '.cm-line': {
     fontVariantLigatures: 'none',
   },
+  '.cm-md-marker': {
+    color: 'var(--text-faint)',
+    fontWeight: 'normal',
+    fontStyle: 'normal',
+  },
   '.tok-meta, .cm-formatting, .ͼe': {
     color: 'var(--text-faint)',
   },
@@ -198,9 +212,16 @@ const liveTheme = EditorView.theme({
   },
 });
 
+const liveMarkdownPlugin = makeLiveMarkdownPlugin(false);
+const liveMarkdownPluginShowMarkers = makeLiveMarkdownPlugin(true);
+
 /** Full live-preview extension bundle. Pass `[]` to disable. */
-export function livePreviewExtension() {
-  return [syntaxHighlighting(markdownRichStyle), liveMarkdownPlugin, liveTheme];
+export function livePreviewExtension(opts: { showMarkers?: boolean } = {}) {
+  return [
+    syntaxHighlighting(markdownRichStyle),
+    opts.showMarkers ? liveMarkdownPluginShowMarkers : liveMarkdownPlugin,
+    liveTheme,
+  ];
 }
 
 /** Just the rich highlight style without hiding markers (raw source mode). */

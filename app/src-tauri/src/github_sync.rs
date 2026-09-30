@@ -160,12 +160,102 @@ pub fn github_has_token() -> Result<bool, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Gitea token storage (OS keychain via `keyring`) — separate service name
+// so users can keep different PATs for GitHub and Gitea.
+// ---------------------------------------------------------------------------
+
+const KEYRING_SERVICE_GITEA: &str = "solomd-gitea";
+
+static GITEA_TOKEN_CACHE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+fn gitea_keyring_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE_GITEA, KEYRING_USER).map_err(|e| e.to_string())
+}
+
+fn gitea_token_marker_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+        .map(|h| h.join(".solomd").join("gitea-token-set"))
+}
+
+fn gitea_write_token_marker() {
+    if let Some(p) = gitea_token_marker_path() {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&p, b"1");
+    }
+}
+
+fn gitea_remove_token_marker() {
+    if let Some(p) = gitea_token_marker_path() {
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
+fn gitea_read_token() -> Result<Option<String>, String> {
+    if let Ok(guard) = GITEA_TOKEN_CACHE.lock() {
+        if let Some(s) = guard.as_ref() {
+            return Ok(Some(s.clone()));
+        }
+    }
+    let entry = gitea_keyring_entry()?;
+    let token = match entry.get_password() {
+        Ok(s) => Some(s),
+        Err(keyring::Error::NoEntry) => None,
+        Err(e) => return Err(e.to_string()),
+    };
+    if let (Ok(mut guard), Some(t)) = (GITEA_TOKEN_CACHE.lock(), token.as_ref()) {
+        *guard = Some(t.clone());
+    }
+    Ok(token)
+}
+
+#[tauri::command]
+pub fn gitea_set_token(token: String) -> Result<(), String> {
+    let trimmed = token.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("token is empty".into());
+    }
+    let entry = gitea_keyring_entry()?;
+    entry.set_password(&trimmed).map_err(|e| e.to_string())?;
+    if let Ok(mut guard) = GITEA_TOKEN_CACHE.lock() {
+        *guard = Some(trimmed);
+    }
+    gitea_write_token_marker();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn gitea_clear_token() -> Result<(), String> {
+    let entry = gitea_keyring_entry()?;
+    let r = match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    };
+    if let Ok(mut guard) = GITEA_TOKEN_CACHE.lock() {
+        *guard = None;
+    }
+    gitea_remove_token_marker();
+    r
+}
+
+#[tauri::command]
+pub fn gitea_has_token() -> Result<bool, String> {
+    Ok(gitea_token_marker_path().map(|p| p.exists()).unwrap_or(false))
+}
+
+// ---------------------------------------------------------------------------
 // REST API: /user, /user/repos, POST /user/repos
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GitHubUser {
     pub login: String,
+    /// Gitea returns `full_name` instead of `name` — alias handles both.
+    #[serde(alias = "full_name")]
     pub name: Option<String>,
     pub avatar_url: String,
 }
@@ -281,8 +371,7 @@ pub struct SyncConfig {
     /// field deserialize to `false`, preserving v2.6.0/v2.6.1 behavior.
     #[serde(default)]
     pub encrypted: bool,
-    /// v2.6.3 — provider hint stored for the UI ("github" / "gitlab" /
-    /// "gitea" / "custom"). Doesn't change push/pull behaviour;
+    /// v2.6.3 — provider hint stored for the UI ("github" / "gitea").
     /// libgit2 + PAT credentials work uniformly across providers.
     #[serde(default = "default_provider")]
     pub provider: String,
@@ -467,7 +556,6 @@ pub async fn github_enable_encryption(
     folder: String,
     passphrase: String,
 ) -> Result<(), String> {
-    let token = read_token()?.ok_or("no GitHub token set")?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let path = PathBuf::from(&folder);
         let cfg = load_config(&path)?
@@ -479,6 +567,10 @@ pub async fn github_enable_encryption(
         if remote_url.is_empty() {
             return Err("workspace has no remote URL".into());
         }
+        let token = match cfg.provider.as_str() {
+            "gitea" => gitea_read_token()?.ok_or("no Gitea token set")?,
+            _ => read_token()?.ok_or("no GitHub token set")?,
+        };
 
         // 1. Set passphrase (also writes shadow salt + workspace metadata
         //    + keychain entry + marker file via crypto.rs side effects).
@@ -674,11 +766,46 @@ pub async fn github_sync_status(folder: String) -> Result<SyncStatus, String> {
 
 /// Build credential + push/fetch options that authenticate over HTTPS using
 /// our PAT. Same shape used by `gh-cli` / GitHub Codespaces.
+/// Owner segment of an HTTPS git URL — `https://host/OWNER/repo.git` → `OWNER`.
+/// Used to authenticate against forges that validate the Basic-auth username
+/// instead of ignoring it (see `make_callbacks`).
+fn owner_from_url(url: &str) -> Option<String> {
+    let after_scheme = url.split("://").nth(1)?;
+    let mut segs = after_scheme.split('/');
+    let _host = segs.next()?;
+    let owner = segs.next()?;
+    if owner.is_empty() { None } else { Some(owner.to_string()) }
+}
+
 fn make_callbacks(token: String) -> git2::RemoteCallbacks<'static> {
     let mut cb = git2::RemoteCallbacks::new();
-    cb.credentials(move |_url, _username, _allowed| {
-        // GitHub accepts the PAT as the password with literal username
-        // "x-access-token" — works regardless of the user's GH login.
+    cb.credentials(move |url, username, _allowed| {
+        // GitHub accepts the PAT as the password with the literal username
+        // "x-access-token", regardless of the user's login, and Gitea /
+        // Forgejo ignore the username field entirely — verified against a
+        // real Gitea 1.27 instance, where even a nonexistent username
+        // authenticates fine.
+        //
+        // Gitee (gitee.com) does NOT. It validates the username and answers
+        //     remote: The token username invalid
+        //     403
+        // for anything that is not the account name, which made every
+        // Gitee remote fail no matter how many times the user re-entered a
+        // working token (#249). Confirmed against a private Gitee repo:
+        // owner+token succeeds, x-access-token+token 403s.
+        //
+        // The owner segment of the remote URL is that account name, so use it
+        // for hosts that need a real one. git may also hand us a username
+        // parsed out of the URL itself — prefer that when present.
+        let host_needs_real_username = url.contains("gitee.com");
+        if host_needs_real_username {
+            if let Some(u) = username.filter(|u| !u.is_empty()) {
+                return git2::Cred::userpass_plaintext(u, &token);
+            }
+            if let Some(owner) = owner_from_url(url) {
+                return git2::Cred::userpass_plaintext(&owner, &token);
+            }
+        }
         git2::Cred::userpass_plaintext("x-access-token", &token)
     });
     cb
@@ -772,6 +899,141 @@ fn make_proxy_options() -> git2::ProxyOptions<'static> {
     po
 }
 
+// ---------------------------------------------------------------------------
+// Gitea instance URL (global setting) — used for Gitea API calls before
+// linking. Stored as a single-line URL in ~/.solomd/gitea-url. Empty or
+// missing = no Gitea instance configured.
+// ---------------------------------------------------------------------------
+
+fn gitea_url_path() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+        .map(|h| h.join(".solomd").join("gitea-url"))
+}
+
+fn read_gitea_url() -> Option<String> {
+    let p = gitea_url_path()?;
+    let raw = fs::read_to_string(&p).ok()?;
+    let trimmed = raw.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
+#[tauri::command]
+pub fn gitea_get_url() -> Result<String, String> {
+    Ok(read_gitea_url().unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn gitea_set_url(url: String) -> Result<(), String> {
+    let p = gitea_url_path().ok_or("no HOME directory")?;
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let trimmed = url.trim().to_string();
+    // Strip trailing slash for consistency.
+    let cleaned = trimmed.trim_end_matches('/').to_string();
+    fs::write(&p, &cleaned).map_err(|e| e.to_string())
+}
+
+/// Validate that a URL points to a live Gitea instance by hitting
+/// GET /api/v1/version and checking for a 200 response.
+#[tauri::command]
+pub async fn gitea_validate_url(url: String) -> Result<bool, String> {
+    let base = url.trim_end_matches('/').to_string();
+    let version_url = format!("{}/api/v1/version", base);
+    let res = reqwest::Client::new()
+        .get(&version_url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+    Ok(res.status().is_success())
+}
+
+// ---------------------------------------------------------------------------
+// Gitea REST API (v1) — /user, /user/repos, POST /user/repos
+// Uses the globally-configured Gitea instance URL.
+// API docs: https://docs.gitea.com/api/1.22/
+// ---------------------------------------------------------------------------
+
+async fn gitea_api_get<T: for<'de> Deserialize<'de>>(
+    base_url: &str,
+    path: &str,
+    token: &str,
+) -> Result<T, String> {
+    let url = format!("{}{}", base_url, path);
+    let res = reqwest::Client::new()
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("Gitea API {}: {}", status, body));
+    }
+    res.json::<T>().await.map_err(|e| e.to_string())
+}
+
+async fn gitea_api_post<B: Serialize, T: for<'de> Deserialize<'de>>(
+    base_url: &str,
+    path: &str,
+    token: &str,
+    body: &B,
+) -> Result<T, String> {
+    let url = format!("{}{}", base_url, path);
+    let res = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", USER_AGENT)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("Gitea API {}: {}", status, body));
+    }
+    res.json::<T>().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn gitea_user(base_url: String) -> Result<GitHubUser, String> {
+    let token = gitea_read_token()?.ok_or("no Gitea token set")?;
+    let base = base_url.trim_end_matches('/').to_string();
+    gitea_api_get(&base, "/api/v1/user", &token).await
+}
+
+#[tauri::command]
+pub async fn gitea_list_repos(base_url: String) -> Result<Vec<GitHubRepo>, String> {
+    let token = gitea_read_token()?.ok_or("no Gitea token set")?;
+    let base = base_url.trim_end_matches('/').to_string();
+    // Gitea uses `limit` instead of `per_page` and doesn't support `affiliation`.
+    gitea_api_get(&base, "/api/v1/user/repos?limit=100", &token).await
+}
+
+#[tauri::command]
+pub async fn gitea_create_vault_repo(
+    base_url: String,
+    name: String,
+    private: bool,
+) -> Result<GitHubRepo, String> {
+    let token = gitea_read_token()?.ok_or("no Gitea token set")?;
+    let base = base_url.trim_end_matches('/').to_string();
+    let req = CreateRepoRequest {
+        name: &name,
+        private,
+        auto_init: true,
+        description: "Notes vault — synced by SoloMD",
+    };
+    // Gitea uses the same POST /api/v1/user/repos endpoint.
+    gitea_api_post(&base, "/api/v1/user/repos", &token, &req).await
+}
+
 /// In a repo, stage every change in the working tree and commit. No-op
 /// if there's nothing to commit. Used by E2EE push/pull to keep the
 /// shadow's git history advancing as the user edits the workspace.
@@ -804,17 +1066,22 @@ fn commit_shadow_if_dirty(repo_dir: &Path, message: &str) -> Result<(), String> 
 /// When E2EE is enabled, this runs `crypto_encrypt_for_push` first so
 /// the shadow dir holds fresh ciphertext, then commits and pushes from
 /// the shadow's git repo. Plaintext never reaches the remote.
-pub fn github_push_inner(folder: String, token: String) -> Result<(), String> {
+pub fn github_push_inner(
+    folder: String,
+    token: String,
+    commit_message: Option<String>,
+) -> Result<(), String> {
     let path = PathBuf::from(&folder);
-    // Refuse to push if sync.json is corrupted: a default Config has
-    // encrypted=false, and silently treating "can't read config" as
-    // "encryption off" would leak plaintext from a workspace whose
-    // user had E2EE enabled.
     let cfg = load_config(&path)?.unwrap_or_default();
     let repo_dir = git_dir(&path)?;
     if cfg.encrypted {
         super::crypto::crypto_encrypt_for_push_inner(folder.clone())?;
-        commit_shadow_if_dirty(&repo_dir, "encrypted: workspace state at push")?;
+        let msg = commit_message
+            .clone()
+            .unwrap_or_else(|| "encrypted: workspace state at push".to_string());
+        commit_shadow_if_dirty(&repo_dir, &msg)?;
+    } else if let Some(msg) = commit_message {
+        super::git_history::git_auto_commit_inner(folder.clone(), None, Some(msg))?;
     }
     let repo = Repository::open(&repo_dir).map_err(|e| e.to_string())?;
 
@@ -833,9 +1100,22 @@ pub fn github_push_inner(folder: String, token: String) -> Result<(), String> {
     let mut opts = PushOptions::new();
     opts.remote_callbacks(make_callbacks(token));
     opts.proxy_options(make_proxy_options());
-    origin
-        .push(&[refspec.as_str()], Some(&mut opts))
-        .map_err(|e| format!("push failed: {}", e))?;
+    origin.push(&[refspec.as_str()], Some(&mut opts)).map_err(|e| {
+        let msg = e.message();
+        if msg.contains("protected branch")
+            || msg.contains("refusing to allow")
+            || msg.contains("pre-receive hook")
+        {
+            format!(
+                "Protected branch on remote. Create a Pull Request instead. Details: {}",
+                msg
+            )
+        } else if msg.contains("non-fast-forward") {
+            "Remote has newer commits. Pull first, then push again.".into()
+        } else {
+            format!("push failed: {}", msg)
+        }
+    })?;
 
     // Stamp the config with the last successful push.
     if let Ok(Some(mut cfg)) = load_config(&path) {
@@ -846,9 +1126,17 @@ pub fn github_push_inner(folder: String, token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn github_push(folder: String) -> Result<(), String> {
-    let token = read_token()?.ok_or("no GitHub token set")?;
-    tauri::async_runtime::spawn_blocking(move || github_push_inner(folder, token))
+pub async fn github_push(
+    folder: String,
+    commit_message: Option<String>,
+) -> Result<(), String> {
+    let path = PathBuf::from(&folder);
+    let cfg = load_config(&path)?.unwrap_or_default();
+    let token = match cfg.provider.as_str() {
+        "gitea" => gitea_read_token()?.ok_or("no Gitea token set")?,
+        _ => read_token()?.ok_or("no GitHub token set")?,
+    };
+    tauri::async_runtime::spawn_blocking(move || github_push_inner(folder, token, commit_message))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1093,7 +1381,12 @@ fn finalize_decrypt(cfg: &SyncConfig, workspace: &Path) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn github_pull(folder: String) -> Result<PullResult, String> {
-    let token = read_token()?.ok_or("no GitHub token set")?;
+    let path = PathBuf::from(&folder);
+    let cfg = load_config(&path)?.unwrap_or_default();
+    let token = match cfg.provider.as_str() {
+        "gitea" => gitea_read_token()?.ok_or("no Gitea token set")?,
+        _ => read_token()?.ok_or("no GitHub token set")?,
+    };
     tauri::async_runtime::spawn_blocking(move || github_pull_inner(folder, token))
         .await
         .map_err(|e| e.to_string())?
@@ -1213,4 +1506,33 @@ fn epoch_days_to_ymd(z: i64) -> (i32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m, d)
+}
+
+#[cfg(test)]
+mod url_owner_tests {
+    use super::owner_from_url;
+
+    #[test]
+    fn extracts_the_account_segment() {
+        assert_eq!(
+            owner_from_url("https://gitee.com/zhitong45/notes.git").as_deref(),
+            Some("zhitong45")
+        );
+        assert_eq!(
+            owner_from_url("https://github.com/octocat/hello.git").as_deref(),
+            Some("octocat")
+        );
+        // Self-hosted forge under its own domain behaves the same.
+        assert_eq!(
+            owner_from_url("https://git.example.com/team/repo.git").as_deref(),
+            Some("team")
+        );
+    }
+
+    #[test]
+    fn rejects_urls_without_an_owner() {
+        assert_eq!(owner_from_url("https://gitee.com/").as_deref(), None);
+        assert_eq!(owner_from_url("https://gitee.com").as_deref(), None);
+        assert_eq!(owner_from_url("not a url").as_deref(), None);
+    }
 }

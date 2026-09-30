@@ -3,6 +3,9 @@ import { getT, type Lang } from '../i18n/translations';
 interface Props { lang: Lang }
 const { lang } = Astro.props;
 const tr = getT(lang);
+// One list for the site, the README and the in-app About dialog.
+import sponsorData from '../../public/sponsors.json';
+const sponsors: string[] = (sponsorData.sponsors as { name: string }[]).map((x) => x.name);
 
 // TODO: replace with real GitHub Sponsors URL once approved
 const githubSponsorUrl = 'https://github.com/sponsors/zhitongblog';
@@ -64,7 +67,7 @@ const wechatQr = '/sponsor/wechat-qr.jpg';
         </div>
         <p class="sp-card__desc">{tr.sponsor.alipayDesc}</p>
         <div class="sp-card__qr">
-          <img src={alipayQr} alt={`${tr.sponsor.alipayTitle} ${tr.sponsor.scanQr}`} loading="lazy" />
+          <img src={alipayQr} alt={`${tr.sponsor.alipayTitle} ${tr.sponsor.scanQr}`} loading="lazy" width="267" height="400" />
         </div>
       </article>
 
@@ -80,10 +83,19 @@ const wechatQr = '/sponsor/wechat-qr.jpg';
         </div>
         <p class="sp-card__desc">{tr.sponsor.wechatDesc}</p>
         <div class="sp-card__qr">
-          <img src={wechatQr} alt={`${tr.sponsor.wechatTitle} ${tr.sponsor.scanQr}`} loading="lazy" />
+          <img src={wechatQr} alt={`${tr.sponsor.wechatTitle} ${tr.sponsor.scanQr}`} loading="lazy" width="294" height="400" />
         </div>
       </article>
     </div>
+
+    {sponsors.length > 0 && (
+      <div class="sponsor__thanks">
+        <h3>{tr.sponsor.thanksHeading}</h3>
+        <ul class="sponsor__names">
+          {sponsors.map((n) => <li>{n}</li>)}
+        </ul>
+      </div>
+    )}
 
     <p class="sponsor__note">{tr.sponsor.note}</p>
   </div>
@@ -191,6 +203,17 @@ const wechatQr = '/sponsor/wechat-qr.jpg';
     border-radius: 4px;
   }
 
+  .sponsor__thanks { margin: 8px auto 28px; max-width: 760px; }
+  .sponsor__thanks h3 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  .sponsor__names {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  }
+  .sponsor__names li {
+    padding: 4px 12px; border-radius: 999px; font-size: 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
   .sponsor__note {
     font-size: 12px;
     color: var(--text-faint);

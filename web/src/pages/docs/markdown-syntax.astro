@@ -13,7 +13,7 @@ const lang = 'en' as const;
   lang={lang}
 >
   <Header lang={lang} />
-  <main>
+  <main id="main">
     <article class="container docs-article">
       <nav class="breadcrumbs">
         <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Markdown Syntax</span>
@@ -28,6 +28,12 @@ const lang = 'en' as const;
 ## H2
 ### H3
 #### H4</code></pre>
+
+      <h2>Table of contents</h2>
+      <pre><code>[TOC]</code></pre>
+      <p>Put <code>[TOC]</code> on a line by itself. SoloMD generates a linked,
+        nested table of contents from the document headings and keeps it updated
+        automatically in Preview.</p>
 
       <h2>Emphasis</h2>
       <pre><code>*italic* or _italic_

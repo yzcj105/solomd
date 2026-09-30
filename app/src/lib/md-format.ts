@@ -1,0 +1,227 @@
+/**
+ * Markdown formatting commands (#296, #274) — bold, italic, headings, lists…
+ *
+ * Pure text in, one edit out. SoloMD is three editors (CodeMirror, the plain
+ * block editor, the plain flat editor — see `onTransformCase` in Editor.vue),
+ * and a formatting command written against any one of them is dead in the
+ * other two. So *what* changes is decided here, from a string and a
+ * selection, and each editor only applies the result.
+ *
+ * Every command is a toggle: run it on text that already has the format and
+ * the format comes off. That is what makes one shortcut enough.
+ */
+
+export type FormatKind =
+  | 'bold'
+  | 'italic'
+  | 'strike'
+  | 'code'
+  | 'link'
+  | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+  | 'quote'
+  | 'ul'
+  | 'ol'
+  | 'task'
+  | 'codeblock';
+
+export const FORMAT_KINDS: FormatKind[] = [
+  'bold', 'italic', 'strike', 'code', 'link',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'quote', 'ul', 'ol', 'task', 'codeblock',
+];
+
+export interface FormatEdit {
+  /** Replace `doc[from, to)` with `insert`… */
+  from: number;
+  to: number;
+  insert: string;
+  /** …then select this range (offsets in the *new* document). */
+  selFrom: number;
+  selTo: number;
+}
+
+const WORD = /[\p{L}\p{N}_]/u;
+// Chinese, Japanese and Korean do not put spaces between words, so "the word
+// under the caret" would be the whole clause. There a bare caret just opens
+// an empty pair of markers to type into.
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const isWordChar = (ch: string) => WORD.test(ch) && !UNSPACED.test(ch);
+
+/** Selection, or the word under a bare caret — so ⌘B on a word just works. */
+function targetRange(doc: string, from: number, to: number): [number, number] {
+  if (from !== to) return [from, to];
+  let s = from;
+  let e = from;
+  while (s > 0 && isWordChar(doc[s - 1])) s--;
+  while (e < doc.length && isWordChar(doc[e])) e++;
+  return [s, e];
+}
+
+function runBefore(doc: string, pos: number, ch: string): number {
+  let n = 0;
+  while (pos - n - 1 >= 0 && doc[pos - n - 1] === ch) n++;
+  return n;
+}
+function runAfter(doc: string, pos: number, ch: string): number {
+  let n = 0;
+  while (pos + n < doc.length && doc[pos + n] === ch) n++;
+  return n;
+}
+
+/**
+ * Bold and italic share a character, so "is this italic?" cannot be answered
+ * by looking for one `*`: `**word**` has one on each side too. Count the run
+ * instead — 2 is bold, 1 is italic, 3 is both — and add or remove exactly the
+ * asterisks this command owns.
+ */
+function toggleStars(doc: string, from: number, to: number, width: 1 | 2): FormatEdit {
+  let [s, e] = targetRange(doc, from, to);
+  // A selection that *includes* its markers ("**word**") counts as formatted
+  // too: pull the markers out of the range and let the run count see them.
+  while (s < e && doc[s] === '*' && doc[e - 1] === '*' && e - s >= 2) { s++; e--; }
+  const n = Math.min(runBefore(doc, s, '*'), runAfter(doc, e, '*'), 3);
+  const has = width === 2 ? n >= 2 : n % 2 === 1;
+  const inner = doc.slice(s, e);
+  if (has) {
+    return { from: s - width, to: e + width, insert: inner, selFrom: s - width, selTo: e - width };
+  }
+  const m = '*'.repeat(width);
+  return { from: s, to: e, insert: m + inner + m, selFrom: s + width, selTo: e + width };
+}
+
+function toggleWrap(doc: string, from: number, to: number, marker: string): FormatEdit {
+  let [s, e] = targetRange(doc, from, to);
+  const w = marker.length;
+  if (e - s >= 2 * w && doc.slice(s, s + w) === marker && doc.slice(e - w, e) === marker) {
+    s += w;
+    e -= w;
+  }
+  const inner = doc.slice(s, e);
+  if (doc.slice(s - w, s) === marker && doc.slice(e, e + w) === marker) {
+    return { from: s - w, to: e + w, insert: inner, selFrom: s - w, selTo: e - w };
+  }
+  return { from: s, to: e, insert: marker + inner + marker, selFrom: s + w, selTo: e + w };
+}
+
+function makeLink(doc: string, from: number, to: number): FormatEdit {
+  const [s, e] = targetRange(doc, from, to);
+  const inner = doc.slice(s, e);
+  // A selected URL is the destination, not the label.
+  if (/^(https?:\/\/|www\.)\S+$/i.test(inner)) {
+    return { from: s, to: e, insert: `[](${inner})`, selFrom: s + 1, selTo: s + 1 };
+  }
+  const insert = `[${inner}](url)`;
+  const urlAt = s + inner.length + 3;
+  // No label yet: put the caret where the label goes.
+  if (!inner) return { from: s, to: e, insert, selFrom: s + 1, selTo: s + 1 };
+  return { from: s, to: e, insert, selFrom: urlAt, selTo: urlAt + 3 };
+}
+
+/** The whole lines the selection touches. */
+function lineSpan(doc: string, from: number, to: number): [number, number] {
+  // #360 — `lastIndexOf('\n', -1)` searches from index 0, not "nowhere": with
+  // the caret at offset 0 of a document that starts with an empty line it
+  // found that newline, so the span became [1, 0] and the edit was rejected —
+  // Ctrl+1 on an empty first line did nothing.
+  const s = from > 0 ? doc.lastIndexOf('\n', from - 1) + 1 : 0;
+  // A selection ending right after a newline does not include the next line.
+  const endAnchor = to > from && doc[to - 1] === '\n' ? to - 1 : to;
+  let e = doc.indexOf('\n', endAnchor);
+  if (e < 0) e = doc.length;
+  return [s, e];
+}
+
+const HEADING = /^(\s{0,3})#{1,6}\s+/;
+const QUOTE = /^(\s*)>\s?/;
+const TASK = /^(\s*)(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s+/;
+const UL = /^(\s*)[-*+]\s+(?!\[[ xX]\]\s)/;
+const OL = /^(\s*)\d+[.)]\s+(?!\[[ xX]\]\s)/;
+const ANY_LIST = /^(\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
+
+function mapLines(
+  doc: string,
+  from: number,
+  to: number,
+  fn: (lines: string[]) => string[],
+): FormatEdit {
+  const [s, e] = lineSpan(doc, from, to);
+  const insert = fn(doc.slice(s, e).split('\n')).join('\n');
+  // A bare caret stays a caret at the end of its line (you are about to type
+  // the heading); a selection stays a selection over the rewritten lines.
+  if (from === to) return { from: s, to: e, insert, selFrom: s + insert.length, selTo: s + insert.length };
+  return { from: s, to: e, insert, selFrom: s, selTo: s + insert.length };
+}
+
+function toggleHeading(doc: string, from: number, to: number, level: number): FormatEdit {
+  const prefix = '#'.repeat(level) + ' ';
+  return mapLines(doc, from, to, (lines) => {
+    const live = lines.filter((l) => l.trim() !== '');
+    const already = live.length > 0 && live.every((l) => new RegExp(`^\\s{0,3}#{${level}}\\s+`).test(l));
+    return lines.map((l) => {
+      if (l.trim() === '' && lines.length > 1) return l;
+      const bare = l.replace(HEADING, '$1');
+      return already ? bare : bare.replace(/^(\s{0,3})/, `$1${prefix}`);
+    });
+  });
+}
+
+function togglePrefix(
+  doc: string,
+  from: number,
+  to: number,
+  test: RegExp,
+  make: (indent: string, rest: string, index: number) => string,
+  strip: RegExp,
+): FormatEdit {
+  return mapLines(doc, from, to, (lines) => {
+    const live = lines.filter((l) => l.trim() !== '');
+    const already = live.length > 0 && live.every((l) => test.test(l));
+    let i = 0;
+    return lines.map((l) => {
+      if (l.trim() === '' && lines.length > 1) return l;
+      if (already) return l.replace(test, '$1');
+      // Switching list type replaces the old marker rather than stacking
+      // "1. - item".
+      const indent = /^\s*/.exec(l)![0];
+      const rest = l.replace(strip, '').replace(/^\s*/, '');
+      return make(indent, rest, i++);
+    });
+  });
+}
+
+function toggleCodeBlock(doc: string, from: number, to: number): FormatEdit {
+  const [s, e] = lineSpan(doc, from, to);
+  const body = doc.slice(s, e);
+  const lines = body.split('\n');
+  if (lines.length >= 2 && /^\s*```/.test(lines[0]) && /^\s*```\s*$/.test(lines[lines.length - 1])) {
+    const inner = lines.slice(1, -1).join('\n');
+    return { from: s, to: e, insert: inner, selFrom: s, selTo: s + inner.length };
+  }
+  const insert = '```\n' + body + '\n```';
+  // Caret after the opening fence: the language is the next thing to type.
+  return { from: s, to: e, insert, selFrom: s + 3, selTo: s + 3 };
+}
+
+/** The edit that applies (or removes) `kind` at the given selection. */
+export function applyFormat(doc: string, from: number, to: number, kind: FormatKind): FormatEdit {
+  const a = Math.max(0, Math.min(from, to, doc.length));
+  const b = Math.max(0, Math.min(Math.max(from, to), doc.length));
+  switch (kind) {
+    case 'bold': return toggleStars(doc, a, b, 2);
+    case 'italic': return toggleStars(doc, a, b, 1);
+    case 'strike': return toggleWrap(doc, a, b, '~~');
+    case 'code': return toggleWrap(doc, a, b, '`');
+    case 'link': return makeLink(doc, a, b);
+    case 'quote':
+      return togglePrefix(doc, a, b, QUOTE, (ind, rest) => `${ind}> ${rest}`, /^(\s*)(?=\S)/);
+    case 'ul':
+      return togglePrefix(doc, a, b, UL, (ind, rest) => `${ind}- ${rest}`, ANY_LIST);
+    case 'ol':
+      return togglePrefix(doc, a, b, OL, (ind, rest, i) => `${ind}${i + 1}. ${rest}`, ANY_LIST);
+    case 'task':
+      return togglePrefix(doc, a, b, TASK, (ind, rest) => `${ind}- [ ] ${rest}`, ANY_LIST);
+    case 'codeblock': return toggleCodeBlock(doc, a, b);
+    default:
+      return toggleHeading(doc, a, b, Number(kind.slice(1)));
+  }
+}

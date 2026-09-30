@@ -16,6 +16,9 @@
  * Hover surfaces last-push / last-pull / remote URL in a tooltip.
  */
 import { computed } from 'vue';
+import { isMacOS } from '../lib/platform';
+import { useSettingsStore } from '../stores/settings';
+import { shortcutLabel } from '../lib/keybindings';
 import { useGithubSyncStore } from '../stores/githubSync';
 import { useGithubSync } from '../composables/useGithubSync';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -27,6 +30,13 @@ const ops = useGithubSync();
 const workspace = useWorkspaceStore();
 const toasts = useToastsStore();
 const { t } = useI18n();
+// #180 — the chord in this sentence comes from the user's bindings, not from
+// a literal baked into the translation.
+const macChord = isMacOS();
+const kbSettings = useSettingsStore();
+function withChord(key: string, actionId: string): string {
+  return t(key, { key: shortcutLabel(actionId, kbSettings.keybindings, macChord) || '—' });
+}
 
 const status = computed(() => sync.status);
 const visible = computed(() => Boolean(status.value?.linked));
@@ -52,7 +62,7 @@ const mode = computed<Mode>(() => {
   if (s.has_conflicts) {
     return {
       glyph: `⚠${s.conflicts.length}`,
-      label: t('githubSync.pillConflicts', { n: String(s.conflicts.length) }) || `${s.conflicts.length} conflict(s) — click to resolve`,
+      label: (s?.provider === 'gitea' ? t('githubSync.giteaPillConflicts', { n: String(s.conflicts.length) }) : t('githubSync.pillConflicts', { n: String(s.conflicts.length) })) || `${s.conflicts.length} conflict(s) — click to resolve`,
       action: 'open-conflicts',
       tone: 'err',
     };
@@ -60,7 +70,7 @@ const mode = computed<Mode>(() => {
   if (s.behind > 0) {
     return {
       glyph: `↓${s.behind}`,
-      label: t('githubSync.pillBehind', { n: String(s.behind) }) || `${s.behind} to pull — click to pull now`,
+      label: (s?.provider === 'gitea' ? t('githubSync.giteaPillBehind', { n: String(s.behind) }) : t('githubSync.pillBehind', { n: String(s.behind) })) || `${s.behind} to pull — click to pull now`,
       action: 'pull',
       tone: 'warn',
     };
@@ -68,7 +78,7 @@ const mode = computed<Mode>(() => {
   if (s.ahead > 0) {
     return {
       glyph: `↑${s.ahead}`,
-      label: t('githubSync.pillAhead', { n: String(s.ahead) }) || `${s.ahead} to push — click to push now`,
+      label: (s?.provider === 'gitea' ? t('githubSync.giteaPillAhead', { n: String(s.ahead) }) : t('githubSync.pillAhead', { n: String(s.ahead) })) || `${s.ahead} to push — click to push now`,
       action: 'push',
       tone: 'warn',
     };
@@ -76,12 +86,15 @@ const mode = computed<Mode>(() => {
   if (s.dirty) {
     return {
       glyph: '●',
-      label: t('githubSync.pillDirty') || 'Uncommitted local changes — save with ⌘S',
+      label: withChord('githubSync.pillDirty', 'file.save') || 'Uncommitted local changes — save with ⌘S',
       action: 'noop',
       tone: 'warn',
     };
   }
-  return { glyph: '✓', label: t('githubSync.pillClean') || 'In sync with GitHub', action: 'noop', tone: 'ok' };
+  const cleanLabel = s?.provider === 'gitea'
+    ? (t('githubSync.giteaPillClean') || 'In sync with Gitea')
+    : (t('githubSync.pillClean') || 'In sync with GitHub');
+  return { glyph: '✓', label: cleanLabel, action: 'noop', tone: 'ok' };
 });
 
 function fmtAgo(ts: number | null | undefined): string {
@@ -134,7 +147,7 @@ async function onClick() {
       // Up-to-date / dirty-but-no-commit. Just confirm state in a toast
       // so a click never feels like nothing happened.
       if (status.value?.dirty) {
-        toasts.info(t('githubSync.pillDirty') || 'Save first to push.');
+        toasts.info(withChord('githubSync.pillDirty', 'file.save') || 'Save first to push.');
       } else {
         toasts.success(t('githubSync.upToDate') || 'Already up to date.');
       }

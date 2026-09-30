@@ -42,6 +42,29 @@ has_wslg() {
   [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]
 }
 
+# ---- Resolve package file names from uname -m --------------------
+# Different package formats use different naming conventions for the
+# same CPU architecture (e.g., .deb uses "arm64", .rpm uses "aarch64").
+resolve_arch() {
+  local raw="$(uname -m)"
+
+  case "$raw" in
+    x86_64|amd64)
+      DEB_ARCH="amd64"
+      RPM_ARCH="x86_64"
+      APPIMAGE_ARCH="amd64"
+      ;;
+    aarch64|arm64)
+      DEB_ARCH="arm64"
+      RPM_ARCH="aarch64"
+      APPIMAGE_ARCH="aarch64"
+      ;;
+    *)
+      error "Unsupported architecture: $raw. Supported: x86_64/amd64, aarch64/arm64."
+      ;;
+  esac
+}
+
 # ---- OS detect ----------------------------------------------------
 OS="$(uname -s)"
 case "$OS" in
@@ -59,6 +82,7 @@ LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/
 VERSION="${LATEST_TAG#v}"
 BASE_URL="https://github.com/$REPO/releases/download/$LATEST_TAG"
 info "Latest version: $LATEST_TAG"
+info "Detected architecture: $(uname -m)"
 
 # ---- macOS --------------------------------------------------------
 install_macos() {
@@ -69,9 +93,18 @@ install_macos() {
   curl -fL --progress-bar -o "$tmp_dmg" "$dmg_url" || error "Download failed"
 
   info "Mounting DMG…"
-  local mount_point
-  mount_point=$(hdiutil attach -nobrowse -quiet "$tmp_dmg" | tail -1 | awk '{$1=$2=""; sub(/^ +/,""); print}')
-  [ -z "$mount_point" ] && error "Failed to mount DMG"
+  # No -quiet here: it silences the very stdout we parse the mount point
+  # out of, so this branch failed for every macOS user (#265).
+  local mount_output mount_point
+  mount_output=$(hdiutil attach -nobrowse -readonly "$tmp_dmg") \
+    || error "Failed to mount DMG"
+  # Tab-separated columns: <dev node>\t<content hint>\t<mount point>.
+  # Only the volume line carries a mount point and it is not reliably the
+  # last line, so select on /Volumes/ rather than tail -1. Splitting on
+  # tabs keeps volume names that contain spaces intact.
+  mount_point=$(printf '%s\n' "$mount_output" \
+    | awk -F'\t' '$NF ~ /^\/Volumes\// { print $NF; exit }')
+  [ -z "$mount_point" ] && error "Failed to mount DMG (no mount point in hdiutil output)"
 
   info "Copying SoloMD.app to /Applications…"
   rm -rf /Applications/SoloMD.app
@@ -89,6 +122,7 @@ install_macos() {
   printf "Launch with: ${BOLD}open /Applications/SoloMD.app${RESET} or Launchpad.\n\n"
 }
 
+# ---- GUI dependencies ---------------------------------------------
 # Pre-install GUI libraries that Tauri apps need on Linux.
 # The .deb / .rpm packages declare these as dependencies, so dpkg / rpm /
 # apt will pull them in anyway — but installing upfront gives a clearer
@@ -119,11 +153,7 @@ install_gui_deps() {
 
 # ---- Linux --------------------------------------------------------
 install_linux() {
-  local arch="$(uname -m)"
-  case "$arch" in
-    x86_64|amd64) ;;
-    *) error "Unsupported architecture: $arch. Only x86_64/amd64 is supported." ;;
-  esac
+  resolve_arch
 
   # If we're inside WSL, check for WSLg first. WSL1 and WSL2 without WSLg
   # have no GUI support, so SoloMD will install but can't run.
@@ -150,9 +180,10 @@ install_linux() {
   fi
 
   if command -v dpkg >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-    local url="$BASE_URL/SoloMD_${VERSION}_amd64.deb"
+    # ---- .deb path (Debian / Ubuntu / Kali / Mint) ----------------
+    local url="$BASE_URL/SoloMD_${VERSION}_${DEB_ARCH}.deb"
     local tmp="/tmp/solomd_${VERSION}.deb"
-    info "Detected Debian/Ubuntu. Downloading .deb…"
+    info "Detected Debian/Ubuntu. Downloading $url"
     curl -fL --progress-bar -o "$tmp" "$url" || error "Download failed"
     info "Installing with sudo dpkg…"
     sudo dpkg -i "$tmp" || {
@@ -167,10 +198,12 @@ install_linux() {
       info "Created symlink: solomd → SoloMD"
     fi
     printf "\n✨ ${BOLD}SoloMD installed. Run with: solomd${RESET}\n\n"
+
   elif command -v rpm >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-    local url="$BASE_URL/SoloMD-${VERSION}-1.x86_64.rpm"
+    # ---- .rpm path (Fedora / RHEL / openSUSE) --------------------
+    local url="$BASE_URL/SoloMD-${VERSION}-1.${RPM_ARCH}.rpm"
     local tmp="/tmp/solomd_${VERSION}.rpm"
-    info "Detected RPM system. Downloading .rpm…"
+    info "Detected RPM system. Downloading $url"
     curl -fL --progress-bar -o "$tmp" "$url" || error "Download failed"
     info "Installing with sudo rpm…"
     sudo rpm -i --replacepkgs "$tmp"
@@ -180,15 +213,18 @@ install_linux() {
       info "Created symlink: solomd → SoloMD"
     fi
     printf "\n✨ ${BOLD}SoloMD installed. Run with: solomd${RESET}\n\n"
+
   else
-    info "No dpkg/rpm detected — falling back to AppImage (no sudo needed)"
+    # ---- AppImage fallback ---------------------------------------
     # AppImage has no auto dependency resolution, so make sure the user has
     # the GUI libraries. If apt/dnf is unavailable (Alpine, Arch, etc.) they
     # need to install libwebkit2gtk-4.1-0 + fuse themselves.
+    info "No dpkg/rpm detected — falling back to AppImage (no sudo needed)"
     install_gui_deps
     mkdir -p "$HOME/Applications"
-    local url="$BASE_URL/SoloMD_${VERSION}_amd64.AppImage"
+    local url="$BASE_URL/SoloMD_${VERSION}_${APPIMAGE_ARCH}.AppImage"
     local dest="$HOME/Applications/SoloMD.AppImage"
+    info "Downloading $url"
     curl -fL --progress-bar -o "$dest" "$url" || error "Download failed"
     chmod +x "$dest"
     printf "\n✨ ${BOLD}SoloMD installed to ~/Applications/SoloMD.AppImage${RESET}\n"
@@ -202,3 +238,4 @@ case "$OS_KIND" in
 esac
 
 info "Docs + support: https://solomd.app"
+

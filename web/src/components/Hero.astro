@@ -4,7 +4,7 @@ interface Props { lang: Lang }
 const { lang } = Astro.props;
 const tr = getT(lang);
 
-const VERSION = '4.11.9';
+const VERSION = '4.14.4';
 const REPO = 'zhitongblog/solomd';
 const baseUrl = `https://github.com/${REPO}/releases/download/v${VERSION}`;
 const langPrefix = lang === 'en' ? '' : `/${lang}`;
@@ -106,10 +106,6 @@ const initialDownloadsText = initialDownloads > 0 ? fmtDownloads(initialDownload
   <span class="brand-update-banner__cta">{BRAND_UPDATE.cta} <span aria-hidden="true">→</span></span>
 </a>
 
-<a class="android-beta-banner" href="https://groups.google.com/g/solomd-android-testers/about" target="_blank" rel="noopener">
-  <span class="android-beta-banner__text">{tr.hero.androidBeta}</span>
-  <span class="android-beta-banner__arrow" aria-hidden="true">→</span>
-</a>
 
 <section class="hero">
   <div class="container hero__inner">
@@ -133,6 +129,7 @@ const initialDownloadsText = initialDownloads > 0 ? fmtDownloads(initialDownload
         data-linux-text={tr.hero.ctaForLinux}
         data-mac-href={`${baseUrl}/SoloMD_${VERSION}_universal.dmg`}
         data-win-href={`${baseUrl}/SoloMD_${VERSION}_x64_en-US.msi`}
+        data-win-arm-href={`${baseUrl}/SoloMD_${VERSION}_arm64_en-US.msi`}
         data-linux-href={`${baseUrl}/SoloMD_${VERSION}_amd64.AppImage`}
       >
         ⬇ {tr.hero.ctaPrimary}
@@ -184,15 +181,21 @@ const initialDownloadsText = initialDownloads > 0 ? fmtDownloads(initialDownload
     </div>
 
     <div class="hero__demo">
-      <img
-        class="hero__demo-media"
-        src="/demo/solomd-hero.png"
-        alt={tr.hero.demoAlt}
-        width="1920"
-        height="873"
-        loading="eager"
-        fetchpriority="high"
-      />
+      <!-- Lossless WebP (40 KB) with the PNG (117 KB) as the fallback for any
+           engine without WebP. Verified pixel-identical to the PNG, so this is
+           purely a transfer-size win on the LCP image. -->
+      <picture>
+        <source srcset="/demo/solomd-hero.webp" type="image/webp" />
+        <img
+          class="hero__demo-media"
+          src="/demo/solomd-hero.png"
+          alt={tr.hero.demoAlt}
+          width="1920"
+          height="873"
+          loading="eager"
+          fetchpriority="high"
+        />
+      </picture>
     </div>
   </div>
 </section>
@@ -255,6 +258,23 @@ const initialDownloadsText = initialDownloads > 0 ? fmtDownloads(initialDownload
     if (os === 'win') {
       var winTab = document.querySelector('.hi-tab[data-hi-tab="win"]');
       if (winTab) winTab.click();
+
+      // Windows on Arm cannot be detected from the UA string: Edge and Chrome
+      // both report "Windows NT 10.0; Win64; x64" there for compatibility, so
+      // the sniff above hands an Arm machine the x64 build. The architecture
+      // is only available through high-entropy client hints, which are async —
+      // hence the upgrade-after-the-fact rather than folding it in above. The
+      // x64 link is already in place and works (emulated) if this never
+      // resolves, so there is nothing to wait for.
+      var uaData = navigator.userAgentData;
+      if (uaData && uaData.getHighEntropyValues) {
+        uaData.getHighEntropyValues(['architecture']).then(function (h) {
+          if (h && h.architecture === 'arm') {
+            var armHref = btn.getAttribute('data-win-arm-href');
+            if (armHref) btn.setAttribute('href', armHref);
+          }
+        }).catch(function () { /* keep the x64 link */ });
+      }
     }
   })();
 
@@ -360,32 +380,6 @@ const initialDownloadsText = initialDownloads > 0 ? fmtDownloads(initialDownload
 
   /* Keep Android tester recruitment visible while the temporary brand story
      occupies the primary announcement slot. */
-  .android-beta-banner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 12px 20px;
-    background: linear-gradient(90deg, #d97706 0%, #f59e0b 50%, #d97706 100%);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    color: #1a1a1a;
-    font-size: 14px;
-    font-weight: 800;
-    letter-spacing: 0.01em;
-    text-align: center;
-    text-decoration: none;
-    transition: filter 0.15s;
-  }
-  .android-beta-banner:hover { filter: brightness(1.08); }
-  .android-beta-banner__arrow {
-    display: inline-block;
-    font-weight: 900;
-    transition: transform 0.15s;
-  }
-  .android-beta-banner:hover .android-beta-banner__arrow { transform: translateX(4px); }
-  @media (max-width: 640px) {
-    .android-beta-banner { gap: 8px; padding: 11px 14px; font-size: 13px; }
-  }
 
   /* v4.7 release announcement — a calmer info bar under the orange Android
      banner. Calls out the Windows-only editor rebuild so visitors learn

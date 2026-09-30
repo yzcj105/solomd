@@ -23,6 +23,7 @@ pub mod git_history;
 pub mod rag;
 // v2.4 inbound HTTP capture endpoint — production-grade, opt-in via Settings.
 pub mod capture_endpoint;
+pub mod quick_capture;
 // v4.0 — public REST API mirroring the agent_tools surface for non-MCP
 // clients (Alfred / Raycast / n8n / shell scripts). Localhost-only,
 // bearer-token auth, opt-in via Settings → Integrations. Same wire shape
@@ -97,9 +98,13 @@ pub mod cookbook;
 // v2.3 dev WebDriver bridge — debug builds only.
 #[cfg(debug_assertions)]
 pub mod dev_bridge;
+pub mod portable;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any webview exists: moves WebView2 data next to the exe when a
+    // portable `data` folder is present (#295). No-op everywhere else.
+    portable::init();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -121,8 +126,15 @@ pub fn run() {
     let builder = builder.plugin(
         tauri_plugin_window_state::Builder::default()
             .with_state_flags(tauri_plugin_window_state::StateFlags::all())
+            // The quick-capture box is undecorated, fixed-size and always on
+            // top by design. Restoring a remembered geometry (decorations
+            // included — StateFlags::all) would hand it back a title bar and a
+            // stale position on the next launch.
+            .with_denylist(&[quick_capture::CAPTURE_LABEL])
             .build(),
     );
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     let builder = builder.manage(watcher::WatcherState::new());
     #[cfg(not(target_os = "android"))]
@@ -164,6 +176,7 @@ pub fn run() {
             app_build::app_build_info,
             commands::read_file,
             commands::read_binary_file,
+            commands::fetch_image_bytes,
             commands::write_file,
             commands::write_binary_file,
             commands::print_webview,
@@ -187,7 +200,12 @@ pub fn run() {
             commands::fs_create_file,
             commands::fs_create_dir,
             commands::fs_delete,
+            commands::fs_dir_exists,
             commands::fs_rename,
+            commands::fs_move,
+            commands::fs_list_dirs,
+            commands::fs_list_extensions,
+            commands::fs_dirs_with_extensions,
             search::search_in_dir,
             workspace_index::workspace_index_init,
             workspace_index::workspace_index_files,
@@ -200,6 +218,8 @@ pub fn run() {
             spellcheck::spellcheck_suggest,
             spellcheck::spellcheck_add_to_dict,
             spellcheck::spellcheck_load_user_dict,
+            spellcheck::spellcheck_list_dicts,
+            spellcheck::spellcheck_dicts_dir,
             ai_proxy::ai_set_key,
             ai_proxy::ai_has_key,
             ai_proxy::ai_clear_key,
@@ -207,6 +227,7 @@ pub fn run() {
             ai_proxy::ai_chat,
             ai_proxy::ai_cancel,
             ai_proxy::ai_verify_key,
+            ai_proxy::ai_list_models,
             ollama::ollama_detect,
             ollama::ollama_pull,
             ollama::ollama_cancel_pull,
@@ -237,6 +258,10 @@ pub fn run() {
             capture_endpoint::capture_regenerate_token,
             capture_endpoint::capture_set_inbox_folder,
             capture_endpoint::capture_set_workspace,
+            quick_capture::quick_capture_open,
+            quick_capture::quick_capture_close,
+            quick_capture::quick_capture_write,
+            quick_capture::quick_capture_set_shortcut,
             rest_api::rest_get_state,
             rest_api::rest_set_enabled,
             rest_api::rest_regenerate_token,
@@ -291,6 +316,25 @@ pub fn run() {
             github_sync::proxy_get,
             #[cfg(not(target_os = "android"))]
             github_sync::proxy_set,
+            // Gitea sync commands (v5.0)
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_set_token,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_clear_token,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_has_token,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_get_url,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_set_url,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_validate_url,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_user,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_list_repos,
+            #[cfg(not(target_os = "android"))]
+            github_sync::gitea_create_vault_repo,
             cloud_folder::cloud_folder_detect,
             cloud_folder::device_id_get_or_create,
             cloud_folder::session_save,

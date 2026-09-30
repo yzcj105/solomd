@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useTabsStore } from '../stores/tabs';
 import { useSettingsStore } from '../stores/settings';
+import { useI18n } from '../i18n';
 import { extractOutline, type OutlineItem } from '../lib/markdown';
 
 interface OutlineNode {
@@ -19,6 +20,7 @@ const props = defineProps<{ cursorLine?: number }>();
 const emit = defineEmits<{ (e: 'goto', line: number): void }>();
 const tabs = useTabsStore();
 const settings = useSettingsStore();
+const { t } = useI18n();
 const listRef = ref<HTMLUListElement | null>(null);
 const collapsedByTab = ref<Record<string, number[]>>({});
 
@@ -260,10 +262,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
 <template>
   <aside class="outline">
     <div class="outline__header">
-      <span>Outline</span>
+      <span>{{ t('toolbar.outline') }}</span>
       <button class="outline__close" @click="tabs.activeId && tabs.toggleOutline(tabs.activeId)">×</button>
     </div>
-    <div v-if="!visibleItems.length" class="outline__empty">No headings</div>
+    <div v-if="!visibleItems.length" class="outline__empty">{{ t('outline.empty') }}</div>
     <ul ref="listRef" class="outline__list" v-else>
       <li
         v-for="(it, i) in visibleItems"
@@ -274,7 +276,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
         <button
           v-if="it.hasChildren"
           class="outline__twisty"
-          :title="it.collapsed ? 'Expand section' : 'Collapse section'"
+          :title="it.collapsed ? t('outline.expandSection') : t('outline.collapseSection')"
           @click.stop="toggleCollapsed(it.line)"
         >
           {{ it.collapsed ? '▸' : '▾' }}
@@ -283,7 +285,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
         <span
           v-if="labelAt(i)"
           class="outline__keylabel"
-          :title="`Press ${labelAt(i)} to jump`"
+          :title="t('outline.pressToJump', { key: labelAt(i) })"
           aria-hidden="true"
         >{{ labelAt(i) }}</span>
         <button
@@ -297,10 +299,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
     </ul>
     <div v-if="jumpMode === 'line-jump'" class="outline__statusbar">
       <span class="outline__statusbar-prefix">: g</span><span class="outline__statusbar-buf">{{ lineBuffer || '_' }}</span>
-      <span class="outline__statusbar-hint">Enter ↵ goto · Esc cancel</span>
+      <span class="outline__statusbar-hint">{{ t('outline.hint') }}</span>
     </div>
     <div v-else-if="visibleItems.length" class="outline__statusbar outline__statusbar--idle">
-      <span class="outline__statusbar-hint">{{ settings.outlineMarker === 'none' ? 'g+digits → line' : (settings.outlineMarker === 'number' ? 'number → jump · g+digits → line' : 'letter → jump · g+digits → line') }}</span>
+      <span class="outline__statusbar-hint">{{ settings.outlineMarker === 'none' ? t('outline.jumpLineOnly') : (settings.outlineMarker === 'number' ? t('outline.jumpByNumber') : t('outline.jumpByLetter')) }}</span>
     </div>
   </aside>
 </template>

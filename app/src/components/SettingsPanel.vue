@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
+import { shortcutLabel } from '../lib/keybindings';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../stores/settings';
 import { useTabsStore } from '../stores/tabs';
@@ -9,8 +10,23 @@ import { useRagStore } from '../stores/rag';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { themeLabels } from '../lib/themes';
 import { useI18n } from '../i18n';
+import { quickCaptureError } from '../lib/quick-capture-status';
+import {
+  activeKeyActions,
+  combosFor,
+  conflictFor,
+  eventToCombo,
+  formatCombo,
+  interceptedBindings,
+  filterKeyActions,
+  WRITER_PRESET,
+  writerPresetActive,
+  type KeyActionDef,
+} from '../lib/keybindings';
+import { isMacOS } from '../lib/platform';
 import { checkForUpdate, openReleaseUrl, isMasBuild } from '../lib/check-update';
 import { IS_APP_STORE_BUILD } from '../lib/app-build';
+import { useFiles } from '../composables/useFiles';
 import AISettings from './AISettings.vue';
 import CitationPickerSettings from './CitationPickerSettings.vue';
 import CaptureEndpointSettings from './CaptureEndpointSettings.vue';
@@ -26,18 +42,39 @@ import GithubSyncSettings from './GithubSyncSettings.vue';
 import CloudFolderBanner from './CloudFolderBanner.vue';
 import ProxySettings from './ProxySettings.vue';
 import ThemeMarketplace from './ThemeMarketplace.vue';
-import { isIOS } from '../lib/platform';
+import { isIOS, isMobile, hasGitBackend, isWindowsEditorRuntime } from '../lib/platform';
+import { loadCustomTheme } from '../lib/custom-theme';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { DsModal } from '../ui';
+import { getDict } from '../i18n';
+import { flatten, englishFallbackNeedles, blockMatches, normalize, queryMatcher } from '../lib/settings-search';
 import type { Theme } from '../types';
 
 const isMobilePlatform = isIOS();
+// Quick capture needs an OS-level hotkey and a second window — neither exists
+// on Android or iOS, so the whole section stays off phones (isIOS alone would
+// still show it on Android).
+const isPhoneOrTablet = isMobile();
 const masBuild = isMasBuild();
+/**
+ * #230 — the whole git-backed surface (version history, GitHub sync, proxy,
+ * recipes) is compiled out of the Android binary. Rendering those panels there
+ * only produced `Command … not found` errors the moment the user touched them.
+ */
+const gitBackend = hasGitBackend();
 
 const { t } = useI18n();
+// #180 — the chord in this sentence comes from the user's bindings, not from
+// a literal baked into the translation.
+const macChord = isMacOS();
+const kbSettings = useSettingsStore();
+function withChord(key: string, actionId: string): string {
+  return t(key, { key: shortcutLabel(actionId, kbSettings.keybindings, macChord) || '—' });
+}
 
 // v3.0 — left-side category nav. Settings was a 30+ item single scroll;
 // split into 6 groups so the user navigates by category, not by scroll.
-type SettingsCategory = 'basics' | 'writing' | 'sync' | 'integrations' | 'export' | 'advanced';
+type SettingsCategory = 'basics' | 'writing' | 'sync' | 'integrations' | 'export' | 'keys' | 'advanced';
 const activeCategory = ref<SettingsCategory>('basics');
 // #144 — all six category pages share the single scrolling `.settings__body`
 // (pages are toggled via CSS display), so one page's scrollTop leaked into
@@ -46,12 +83,126 @@ const bodyEl = ref<HTMLElement | null>(null);
 watch(activeCategory, () => {
   bodyEl.value?.scrollTo({ top: 0 });
 });
+// ---------------------------------------------------------------------------
+// #180 — shortcut editor.
+//
+// Recording listens in the CAPTURE phase: the chord being recorded is usually
+// one the app itself binds (that is the whole point), and on the bubble phase
+// the global handler would have run the action before we saw the key.
+// ---------------------------------------------------------------------------
+const recordingAction = ref<string | null>(null);
+const recordError = ref<string | null>(null);
+const macKeys = isMacOS();
+
+/** Sixty rows is past what anyone scans — filter by name, id or chord. */
+const keyQuery = ref('');
+const keyGroups = computed(() => {
+  const hits = filterKeyActions(activeKeyActions(), keyQuery.value, actionLabel, settings.keybindings, macKeys);
+  return (['file', 'edit', 'view', 'navigate', 'tools'] as const)
+    .map((key) => ({ key, items: hits.filter((a) => a.category === key) }))
+    .filter((g) => g.items.length > 0);
+});
+
+/**
+ * Prefer the command palette's own translation (`cmd.<id>` — most action ids
+ * *are* command ids), so the list reads in the user's language instead of
+ * showing English names inside a translated panel. The table's English label
+ * is the fallback for the handful of UI-only actions the palette has no
+ * entry for.
+ */
+function actionLabel(action: KeyActionDef): string {
+  const translated = t(`cmd.${action.id}`);
+  return translated && translated !== `cmd.${action.id}` ? translated : action.label;
+}
+
+function actionCombos(action: KeyActionDef): string[] {
+  return combosFor(action.id, settings.keybindings).map((c) => formatCombo(c, macKeys));
+}
+function isCustomised(action: KeyActionDef): boolean {
+  // `in` is tracked by Vue's reactivity; `hasOwnProperty` is not (for a key
+  // that doesn't exist yet), which would leave Reset disabled after a rebind.
+  return action.id in settings.keybindings;
+}
+/**
+ * Shortcuts another program takes over before SoloMD sees them — AMD
+ * Software's global hotkeys own most of the Ctrl+Shift row, Microsoft Pinyin
+ * takes one more. Nothing can be detected at runtime (the chord never
+ * arrives), so the panel names them and offers somewhere else to put the
+ * commands. Empty on every platform but Windows, and empty once the user has
+ * moved them.
+ */
+const intercepted = computed(() => interceptedBindings(settings.keybindings));
+const interceptedIds = computed(() => new Set(intercepted.value.map((b) => b.action.id)));
+
+function interceptionFor(action: KeyActionDef) {
+  return intercepted.value.find((b) => b.action.id === action.id) ?? null;
+}
+
+function applyHotkeyCompatPreset(): void {
+  const moves = intercepted.value;
+  for (const b of moves) settings.setKeybinding(b.action.id, b.alternative);
+  toasts.success(t('settings.keysCompatApplied', { count: String(moves.length) }));
+}
+
+/**
+ * #296 — ⌘B for bold is opt-in, not the default: it has toggled the file tree
+ * since 1.0. The preset is a swap of two bindings, offered as one button so
+ * nobody has to work out that freeing ⌘B means rebinding something else first.
+ */
+const writerPresetOn = computed(() => writerPresetActive(settings.keybindings));
+const writerPresetKeys = computed(() => ({
+  bold: formatCombo(WRITER_PRESET['fmt.bold'], macKeys),
+  tree: formatCombo(WRITER_PRESET['view.toggleFileTree'], macKeys),
+}));
+function applyWriterPreset(): void {
+  for (const [id, combo] of Object.entries(WRITER_PRESET)) settings.setKeybinding(id, combo);
+  toasts.success(t('settings.keysWriterApplied', writerPresetKeys.value));
+}
+function undoWriterPreset(): void {
+  for (const id of Object.keys(WRITER_PRESET)) settings.setKeybinding(id, undefined);
+}
+
+function startRecording(actionId: string): void {
+  recordError.value = null;
+  recordingAction.value = actionId;
+  window.addEventListener('keydown', onRecordKey, true);
+}
+function stopRecording(): void {
+  recordingAction.value = null;
+  window.removeEventListener('keydown', onRecordKey, true);
+}
+function onRecordKey(e: KeyboardEvent): void {
+  const id = recordingAction.value;
+  if (!id) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === 'Escape') {
+    stopRecording();
+    return;
+  }
+  const combo = eventToCombo(e);
+  if (!combo) return; // a bare modifier — keep waiting for the real key
+  const clash = conflictFor(combo, id, settings.keybindings);
+  if (clash) {
+    const other = activeKeyActions().find((a) => a.id === clash);
+    recordError.value = t('settings.keysConflict', {
+      combo: formatCombo(combo, macKeys),
+      action: other ? actionLabel(other) : clash,
+    });
+    return; // stay armed so the next chord replaces this attempt
+  }
+  settings.setKeybinding(id, combo);
+  stopRecording();
+}
+onUnmounted(stopRecording);
+
 const categories: { id: SettingsCategory; icon: string; labelKey: string }[] = [
   { id: 'basics', icon: '⚙️', labelKey: 'settings.catBasics' },
   { id: 'writing', icon: '✍️', labelKey: 'settings.catWriting' },
   { id: 'sync', icon: '☁️', labelKey: 'settings.catSync' },
   { id: 'integrations', icon: '🔌', labelKey: 'settings.catIntegrations' },
   { id: 'export', icon: '📤', labelKey: 'settings.catExport' },
+  { id: 'keys', icon: '⌨️', labelKey: 'settings.catKeys' },
   { id: 'advanced', icon: '🛠️', labelKey: 'settings.catAdvanced' },
 ];
 
@@ -114,10 +265,317 @@ watch(
 );
 
 const settings = useSettingsStore();
+// #328/#344 — the editor-engine choice only exists where there are two
+// editors, i.e. Windows (and the ?forcePlain dev hook).
+const windowsEditorRuntime = isWindowsEditorRuntime();
+
+// ---------------------------------------------------------------------------
+// #352 — search across every category.
+//
+// Filtering works on what is rendered: each top-level `[data-cat]` block of
+// the body is matched against its own text, so nothing has to be listed a
+// second time. English keywords also work in a translated UI (see
+// lib/settings-search.ts). While a query is active the category pages are
+// switched off (no data-active-cat) and the matches are shown grouped under
+// their category headings, in category order (CSS `order`).
+// ---------------------------------------------------------------------------
+const searchQuery = ref('');
+const searchInput = ref<HTMLInputElement | null>(null);
+const searching = computed(() => normalize(searchQuery.value).length > 0);
+const searchHitCount = ref(0);
+const catsWithHits = ref<Set<string>>(new Set());
+const catOrder = new Map(categories.map((c, i) => [c.id as string, i]));
+let flatCache: { lang: string; en: Map<string, string>; cur: Map<string, string> } | null = null;
+
+function dictsFor(lang: string) {
+  if (!flatCache || flatCache.lang !== lang) {
+    const en = flatten(getDict('en'));
+    flatCache = { lang, en, cur: lang === 'en' ? en : flatten(getDict(lang)) };
+  }
+  return flatCache;
+}
+
+const HIGHLIGHT = 'settings-search';
+function clearHighlight() {
+  (globalThis as any).CSS?.highlights?.delete?.(HIGHLIGHT);
+}
+/** Mark the matched words with the CSS Custom Highlight API — no DOM edits,
+ *  so Vue's text nodes are left alone. Skipped where unsupported.
+ *  A block that contains the typed query gets only the query marked; the
+ *  English-fallback needles (whole translated sentences) are marked only in
+ *  blocks that matched through them alone, or the page turns into a wall of
+ *  orange. */
+function highlight(blocks: HTMLElement[], query: string, fallback: string[]) {
+  const registry = (globalThis as any).CSS?.highlights;
+  const HighlightCtor = (globalThis as any).Highlight;
+  if (!registry || !HighlightCtor) return;
+  const ranges: Range[] = [];
+  const hasQuery = queryMatcher(query);
+  for (const b of blocks) {
+    const needles = hasQuery(b.textContent || '') ? [query] : fallback;
+    const walker = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode()) && ranges.length < 500) {
+      const parent = (node as Text).parentElement;
+      if (parent?.closest('select, option, textarea')) continue;
+      const text = (node.nodeValue || '').toLowerCase();
+      for (const n of needles) {
+        // Same rule as the matcher: Latin needles only at the start of a word.
+        const latin = /^[a-z0-9 ._+#-]+$/.test(n);
+        let i = n ? text.indexOf(n) : -1;
+        while (i >= 0 && ranges.length < 500) {
+          if (!latin || i === 0 || !/[a-z0-9]/.test(text[i - 1])) {
+            const r = document.createRange();
+            r.setStart(node, i);
+            r.setEnd(node, i + n.length);
+            ranges.push(r);
+          }
+          i = text.indexOf(n, i + n.length);
+        }
+      }
+    }
+  }
+  registry.set(HIGHLIGHT, new HighlightCtor(...ranges));
+}
+
+function applySearch() {
+  const body = bodyEl.value;
+  if (!body) return;
+  const blocks = Array.from(body.children).filter(
+    (el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.cat,
+  );
+  if (!searching.value) {
+    for (const b of blocks) {
+      delete b.dataset.match;
+      b.style.order = '';
+    }
+    clearCurrentHit();
+    hitEls = [];
+    searchHitCount.value = 0;
+    catsWithHits.value = new Set();
+    clearHighlight();
+    return;
+  }
+  const q = searchQuery.value;
+  const { en, cur } = dictsFor(settings.language);
+  const needles = englishFallbackNeedles(q, en, cur);
+  const cats = new Set<string>();
+  const hits: HTMLElement[] = [];
+  for (const b of blocks) {
+    const cat = b.dataset.cat!;
+    const match = blockMatches(b.textContent || '', q, needles);
+    b.dataset.match = match ? '1' : '0';
+    b.style.order = String((catOrder.get(cat) ?? 99) * 2 + 1);
+    if (match) {
+      cats.add(cat);
+      hits.push(b);
+    }
+  }
+  // Display order is category order (CSS `order`), then document order —
+  // the stepper walks them in the order the user sees them. sort() is stable.
+  hits.sort((a, b) => (catOrder.get(a.dataset.cat!) ?? 99) - (catOrder.get(b.dataset.cat!) ?? 99));
+  // A re-filter caused by a setting appearing/disappearing (MutationObserver)
+  // keeps the current match if it is still one; a new query starts over.
+  const prev = currentHit.value >= 0 ? hitEls[currentHit.value] : null;
+  hitEls = hits;
+  const keep = prev ? hits.indexOf(prev) : -1;
+  if (keep < 0) prev?.removeAttribute('data-hit-current');
+  currentHit.value = keep;
+  searchHitCount.value = hits.length;
+  catsWithHits.value = cats;
+  highlight(hits, normalize(q), needles);
+}
+
+// #352 follow-up — step through the matches one at a time (buttons, and
+// Enter / Shift+Enter in the search box). The current match gets a
+// `data-hit-current` ring and a short accent pulse (`data-hit-flash`); data
+// attributes rather than classes so Vue's class patching never drops them.
+let hitEls: HTMLElement[] = [];
+const currentHit = ref(-1);
+let flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearCurrentHit() {
+  for (const el of bodyEl.value?.querySelectorAll('[data-hit-current]') ?? []) {
+    el.removeAttribute('data-hit-current');
+    el.removeAttribute('data-hit-flash');
+  }
+  currentHit.value = -1;
+}
+
+function stepHit(dir: 1 | -1) {
+  const n = hitEls.length;
+  const body = bodyEl.value;
+  if (!n || !body) return;
+  const from = currentHit.value;
+  const i = from < 0 ? (dir === 1 ? 0 : n - 1) : (from + dir + n) % n;
+  if (from >= 0) {
+    hitEls[from].removeAttribute('data-hit-current');
+    hitEls[from].removeAttribute('data-hit-flash');
+  }
+  const el = hitEls[i];
+  currentHit.value = i;
+  el.setAttribute('data-hit-current', '');
+  // Restart the pulse even when stepping onto the same element (n === 1).
+  el.removeAttribute('data-hit-flash');
+  void el.offsetWidth;
+  el.setAttribute('data-hit-flash', '');
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => el.removeAttribute('data-hit-flash'), 1200);
+  // Scroll only the one container that actually scrolls (scrollIntoView
+  // would also nudge the modal/page). Centre the match; a block taller than
+  // the viewport is aligned to its top instead, with room for the group
+  // heading above a category's first match.
+  const sc = scrollerOf(body);
+  const b = sc.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  // In the phone layout the search bar sits inside the scroller, pinned
+  // (sticky) to its top — the visible area starts below it.
+  const bar = searchInput.value?.parentElement;
+  const barH = bar && sc !== body && sc.contains(bar) ? bar.offsetHeight : 0;
+  const visH = b.height - barH;
+  const offset = r.top - b.top + sc.scrollTop - barH;
+  const top = r.height + 48 < visH ? offset - (visH - r.height) / 2 : offset - 28;
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  sc.scrollTo({ top: Math.max(0, top), behavior: reduced ? 'auto' : 'smooth' });
+}
+
+/** The element that scrolls the settings. On desktop that is the body
+ *  itself; in the phone layout the body grows to its content and the
+ *  dialog's own body (`.ds-modal__body`) scrolls instead. */
+function scrollerOf(body: HTMLElement): HTMLElement {
+  for (let el: HTMLElement | null = body; el; el = el.parentElement) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+    if (el.classList.contains('ds-modal__panel')) break;
+  }
+  return body;
+}
+
+/** Enter / Shift+Enter in the search box. Ignored mid-composition: with a
+ *  Chinese/Japanese IME, Enter commits the text and must not also jump. */
+function onSearchEnter(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  stepHit(e.shiftKey ? -1 : 1);
+}
+
+/** While searching, the category rail lists only categories with a match.
+ *  With no match at all the full list stays, so the rail (a chip row on a
+ *  phone) is never blank and the user can still jump to a category. */
+function navVisible(id: string) {
+  return !searching.value || searchHitCount.value === 0 || catsWithHits.value.has(id);
+}
+
+// Blocks appear and disappear with settings (v-if), so re-filter on changes.
+let bodyObserver: MutationObserver | null = null;
+watch(
+  [searchQuery, () => props.open, () => settings.language],
+  async () => {
+    await nextTick();
+    clearCurrentHit(); // a new query (or language) starts stepping over
+    applySearch();
+    bodyObserver?.disconnect();
+    bodyObserver = null;
+    if (props.open && searching.value && bodyEl.value) {
+      bodyObserver = new MutationObserver(() => applySearch());
+      bodyObserver.observe(bodyEl.value, { childList: true });
+    }
+    if (searching.value && bodyEl.value) scrollerOf(bodyEl.value).scrollTo({ top: 0 });
+  },
+);
+
+function pickCategory(id: SettingsCategory) {
+  searchQuery.value = '';
+  activeCategory.value = id;
+}
+
+/** Esc clears a query before it closes the dialog, and ⌘F / Ctrl+F jumps to
+ *  the search box. Window capture runs before DsModal's document-capture
+ *  Escape handler (and the app's global shortcuts). */
+function onSearchKeys(e: KeyboardEvent) {
+  if (!props.open) return;
+  if (e.key === 'Escape' && searchQuery.value) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    searchQuery.value = '';
+    searchInput.value?.focus();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    searchInput.value?.focus();
+    searchInput.value?.select();
+  }
+}
+watch(
+  () => props.open,
+  async (open) => {
+    if (open) {
+      window.addEventListener('keydown', onSearchKeys, true);
+      // DsModal focuses the first control, which is now the search box. On a
+      // phone that would raise the keyboard over a dialog the user opened to
+      // browse, so give the focus back there.
+      await nextTick();
+      setTimeout(() => {
+        if (document.documentElement.classList.contains('narrow-viewport')) searchInput.value?.blur();
+      }, 0);
+    } else {
+      window.removeEventListener('keydown', onSearchKeys, true);
+      searchQuery.value = '';
+      clearHighlight();
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  window.removeEventListener('keydown', onSearchKeys, true);
+  bodyObserver?.disconnect();
+  if (flashTimer) clearTimeout(flashTimer);
+  clearHighlight();
+});
+
+
+// #246 — dictionaries actually present, so the picker can't offer a language
+// that would fail to load. `spellcheck_list_dicts` scans
+// `<config>/dictionaries/` and always includes the bundled en_US.
+const spellDicts = ref<string[]>(['en_US']);
+async function refreshSpellDicts() {
+  try {
+    spellDicts.value = await invoke<string[]>('spellcheck_list_dicts');
+  } catch {
+    spellDicts.value = ['en_US'];
+  }
+}
+/** Create + reveal the folder — nobody should have to guess where the OS puts
+ *  app_config_dir(). Re-scans on return so a just-added pair shows up. */
+async function openDictsFolder() {
+  try {
+    const dir = await invoke<string>('spellcheck_dicts_dir');
+    await openPath(dir);
+    setTimeout(refreshSpellDicts, 1500);
+  } catch (e) {
+    toasts.error(`${e}`);
+  }
+}
+void refreshSpellDicts();
 const tabs = useTabsStore();
 const toasts = useToastsStore();
 const workspace = useWorkspaceStore();
+const files = useFiles();
 const rag = useRagStore();
+
+// #282 — a custom CSS theme takes the palette over completely (see the note
+// beside the theme dropdown). Name it from the file rather than the
+// marketplace manifest: the manifest is a network fetch that only happens
+// once the marketplace modal is opened, and a hand-picked .css file has no
+// manifest entry at all.
+const customThemeName = computed(() => {
+  const path = settings.customCssPath;
+  if (!path) return '';
+  const base = path.split(/[\\/]/).pop() || path;
+  return base.replace(/\.css$/i, '');
+});
 
 async function onToggleRagEnabled() {
   settings.toggleRagEnabled();
@@ -153,11 +611,41 @@ function onToggleOutlineGlobal() {
 async function pickCustomCss() {
   const path = await openFileDialog({
     multiple: false,
+    defaultPath: await files.filePickerStartDir(),
     filters: [{ name: 'CSS', extensions: ['css'] }],
   });
   if (path && typeof path === 'string') {
     settings.setCustomCssPath(path);
-    toasts.success('Custom CSS theme loaded');
+    toasts.success(t('settings.customCssLoaded'));
+  }
+}
+
+// Re-read the current custom CSS file from disk and re-apply it. Useful when
+// the user edits the .css file outside the app.
+const isCssRefreshing = ref(false);
+// One full revolution of the 0.7s spin animation. Reading a local .css file is
+// near-instant, so without a floor the spinner would show for a single frame
+// and the click would read as "nothing happened".
+const CSS_REFRESH_MIN_MS = 700;
+async function refreshCustomCss() {
+  if (!settings.customCssPath || isCssRefreshing.value) return;
+  const startedAt = Date.now();
+  isCssRefreshing.value = true;
+  try {
+    // loadCustomTheme *removes* the theme when the file can't be read, so a
+    // blanket success toast would claim a reload while wiping the user's CSS.
+    const applied = await loadCustomTheme(settings.customCssPath);
+    if (applied) toasts.success(t('settings.customCssReloaded'));
+    else toasts.error(t('settings.customCssReloadFailed'));
+  } finally {
+    // Stop on a whole revolution so the icon never freezes mid-rev. At least
+    // one full turn — Math.ceil alone yields 0 for a sub-millisecond read,
+    // which would skip the spin entirely.
+    const elapsed = Date.now() - startedAt;
+    const revs = Math.max(1, Math.ceil(elapsed / CSS_REFRESH_MIN_MS));
+    const remaining = revs * CSS_REFRESH_MIN_MS - elapsed;
+    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+    isCssRefreshing.value = false;
   }
 }
 
@@ -265,27 +753,93 @@ function onSelectPdfFont(v: string) {
     class="settings-modal"
     @update:model-value="emit('close')"
   >
+      <div class="settings__search">
+        <input
+          ref="searchInput"
+          v-model="searchQuery"
+          type="search"
+          class="settings__search-input"
+          :placeholder="t('settings.searchPlaceholder')"
+          :aria-label="t('settings.searchPlaceholder')"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown.enter="onSearchEnter"
+        />
+        <template v-if="searching">
+          <span class="settings__search-steps">
+            <button
+              type="button"
+              class="settings__search-step"
+              :disabled="searchHitCount === 0"
+              :title="t('settings.searchPrev')"
+              :aria-label="t('settings.searchPrev')"
+              @click="stepHit(-1)"
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </button>
+            <button
+              type="button"
+              class="settings__search-step"
+              :disabled="searchHitCount === 0"
+              :title="t('settings.searchNext')"
+              :aria-label="t('settings.searchNext')"
+              @click="stepHit(1)"
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </button>
+          </span>
+          <span
+            class="settings__search-count"
+            aria-live="polite"
+            :title="currentHit >= 0 ? t('settings.searchPosition', { i: currentHit + 1, n: searchHitCount }) : undefined"
+          >
+            <template v-if="currentHit >= 0">
+              <span aria-hidden="true">{{ currentHit + 1 }}/{{ searchHitCount }}</span>
+              <span class="settings__sr-only">{{ t('settings.searchPosition', { i: currentHit + 1, n: searchHitCount }) }}</span>
+            </template>
+            <template v-else>{{ t('settings.searchCount', { n: searchHitCount }) }}</template>
+          </span>
+        </template>
+      </div>
       <div class="settings__layout">
         <!-- v3.0 — left-side category nav. Click switches the right-side
              content panel; only one category visible at a time. -->
         <nav class="settings__nav">
           <button
             v-for="c in categories"
+            v-show="navVisible(c.id)"
             :key="c.id"
             class="settings__nav-item"
-            :class="{ 'settings__nav-item--active': activeCategory === c.id }"
-            @click="activeCategory = c.id"
+            :class="{ 'settings__nav-item--active': !searching && activeCategory === c.id }"
+            @click="pickCategory(c.id)"
           >
             <span class="settings__nav-icon">{{ c.icon }}</span>
             <span class="settings__nav-label">{{ t(c.labelKey) }}</span>
           </button>
         </nav>
-      <div ref="bodyEl" class="settings__body" :data-active-cat="activeCategory">
+      <div
+        ref="bodyEl"
+        class="settings__body"
+        :data-active-cat="searching ? undefined : activeCategory"
+        :data-searching="searching ? '' : undefined"
+      >
+        <template v-if="searching">
+          <h2
+            v-for="(c, i) in categories"
+            v-show="catsWithHits.has(c.id)"
+            :key="'sg-' + c.id"
+            class="settings__search-group"
+            :style="{ order: i * 2 }"
+          >{{ c.icon }} {{ t(c.labelKey) }}</h2>
+          <p v-if="searchHitCount === 0" class="settings__search-empty">
+            {{ t('settings.searchEmpty', { q: searchQuery.trim() }) }}
+          </p>
+        </template>
         <section data-cat="basics">
           <label>{{ t('settings.language') }}</label>
           <select
             :value="settings.language"
-            @change="settings.setLanguage(($event.target as HTMLSelectElement).value as 'en' | 'zh' | 'ja' | 'ko' | 'de' | 'fr' | 'es' | 'pt' | 'it' | 'pl' | 'nl' | 'tr' | 'sv' | 'uk')"
+            @change="settings.setLanguage(($event.target as HTMLSelectElement).value as 'en' | 'zh' | 'ja' | 'ko' | 'de' | 'fr' | 'es' | 'pt' | 'it' | 'pl' | 'nl' | 'tr' | 'sv' | 'uk' | 'ru')"
           >
             <option value="en">English</option>
             <option value="zh">中文</option>
@@ -301,6 +855,7 @@ function onSelectPdfFont(v: string) {
             <option value="tr">Türkçe</option>
             <option value="sv">Svenska</option>
             <option value="uk">Українська</option>
+            <option value="ru">Русский</option>
           </select>
         </section>
 
@@ -312,6 +867,22 @@ function onSelectPdfFont(v: string) {
           >
             <option v-for="th in themeLabels" :key="th.value" :value="th.value">{{ th.label }}</option>
           </select>
+          <!-- #282 — the reporter picked "Dark (One Dark)" and the app stayed
+               light (his screenshots read #e6e5e0, which is Soft UI's --bg to
+               the byte). It was doing exactly what it was told: 14 of the 15
+               marketplace themes declare their palette for `:root,
+               :root[data-theme="light"], :root[data-theme="dark"]` in one
+               rule, and custom-theme.ts injects them after the app bundle —
+               so they win in BOTH slots and this dropdown stops changing a
+               single colour. Nothing said so: the custom-CSS control lives
+               under Advanced, three categories from here. Say it where the
+               choice is made, and make undoing it one click. -->
+          <p v-if="customThemeName" class="setting-hint setting-hint--warn">
+            {{ t('settings.customThemeOverrides', { name: customThemeName }) }}
+            <button type="button" class="hint-btn" @click="settings.setCustomCssPath('')">
+              {{ t('settings.customThemeDisable') }}
+            </button>
+          </p>
         </section>
 
         <section data-cat="basics">
@@ -389,6 +960,15 @@ function onSelectPdfFont(v: string) {
               {{ t('settings.globalZoomReset') }}
             </button>
           </p>
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.wheelZoomEnabled"
+              @change="settings.toggleWheelZoom()"
+            />
+            {{ t('settings.wheelZoom') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.wheelZoomHint') }}</p>
         </section>
 
         <section data-cat="basics">
@@ -417,6 +997,22 @@ function onSelectPdfFont(v: string) {
             <input type="checkbox" :checked="settings.livePreview" @change="settings.toggleLivePreview()" />
             {{ t('settings.livePreview') }}
           </label>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input type="checkbox" :checked="settings.alwaysShowMarkers" @change="settings.toggleAlwaysShowMarkers()" />
+            {{ t('settings.alwaysShowMarkers') }}
+          </label>
+          <div class="hint">{{ t('settings.alwaysShowMarkersHint') }}</div>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input type="checkbox" :checked="settings.highlightCurrentLine" @change="settings.toggleHighlightCurrentLine()" />
+            {{ t('settings.highlightCurrentLine') }}
+          </label>
+          <div class="hint">{{ t('settings.highlightCurrentLineHint') }}</div>
         </section>
 
         <section data-cat="basics">
@@ -493,6 +1089,18 @@ function onSelectPdfFont(v: string) {
           <label>
             <input
               type="checkbox"
+              :checked="settings.foldingEnabled"
+              @change="settings.toggleFolding()"
+            />
+            {{ t('settings.folding') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.foldingHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
               :checked="settings.codeBlockWrap"
               @change="settings.toggleCodeBlockWrap()"
             />
@@ -517,12 +1125,84 @@ function onSelectPdfFont(v: string) {
           <label>
             <input
               type="checkbox"
+              :checked="settings.explorerDoubleClickFolders"
+              @change="settings.toggleExplorerDoubleClickFolders()"
+            />
+            {{ t('settings.explorerDoubleClickFolders') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.explorerDoubleClickFoldersHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.explorerFollowActive"
+              @change="settings.toggleExplorerFollowActive()"
+            />
+            {{ t('settings.explorerFollowActive') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.explorerFollowActiveHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.explorerShowHidden"
+              @change="settings.toggleExplorerShowHidden()"
+            />
+            {{ t('settings.explorerShowHidden') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.explorerShowHiddenHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.splitLiveSync"
+              @change="settings.toggleSplitLiveSync()"
+            />
+            {{ t('settings.splitLiveSync') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.splitLiveSyncHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.distinctSplitPanes"
+              @change="settings.toggleDistinctSplitPanes()"
+            />
+            {{ t('settings.distinctSplitPanes') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.distinctSplitPanesHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
               :checked="settings.markdownHardBreaks"
               @change="settings.toggleMarkdownHardBreaks()"
             />
             {{ t('settings.markdownHardBreaks') }}
           </label>
           <p class="setting-hint">{{ t('settings.markdownHardBreaksHint') }}</p>
+        </section>
+
+        <section data-cat="basics">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.smartQuotes"
+              @change="settings.toggleSmartQuotes()"
+            />
+            {{ t('settings.smartQuotes') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.smartQuotesHint') }}</p>
         </section>
 
         <section data-cat="basics">
@@ -617,7 +1297,19 @@ function onSelectPdfFont(v: string) {
           </p>
         </section>
 
-        <section data-cat="sync">
+        <!-- #230 — Android has no libgit2, so the whole Sync tab would be a
+             row of buttons that answer "Command … not found". Say so plainly
+             instead of shipping dead controls. -->
+        <section v-if="!gitBackend" data-cat="sync">
+          <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin: 18px 0 6px;">
+            {{ t('settings.catSync') }}
+          </h3>
+          <p style="font-size: 12px; color: var(--text-faint); margin: 0; line-height: 1.6;">
+            {{ t('settings.syncUnsupportedAndroid') }}
+          </p>
+        </section>
+
+        <section v-if="gitBackend" data-cat="sync">
           <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin: 18px 0 6px;">
             {{ t('settings.versionHistoryHeading') }}
           </h3>
@@ -626,28 +1318,48 @@ function onSelectPdfFont(v: string) {
             {{ t('settings.autoGitEnabled') }}
           </label>
           <p style="font-size: 11px; color: var(--text-faint); margin: 4px 0 0; line-height: 1.5;">
-            {{ t('settings.autoGitHelp') }}
+            {{ withChord('settings.autoGitHelp', 'file.save') }}
           </p>
         </section>
 
         <!-- v2.6.1 cloud-folder banner. Self-hides if the workspace isn't
              inside a known cloud-sync folder. -->
-        <div data-cat="sync"><CloudFolderBanner /></div>
+        <div v-if="gitBackend" data-cat="sync"><CloudFolderBanner /></div>
 
         <!-- v2.6 GitHub sync — sits right under AutoGit since it pushes the
              same commits AutoGit produces; reads top-down as one story. -->
-        <div data-cat="sync"><GithubSyncSettings /></div>
+        <div v-if="gitBackend" data-cat="sync"><GithubSyncSettings /></div>
 
         <!-- v3.0 — proxy URL (network-level, applies to libgit2 push/pull
              across GitHub / GitLab / Gitea). Pulled out of GithubSyncSettings
              so users hitting timeouts find it at the top of the Sync tab. -->
-        <div data-cat="sync"><ProxySettings /></div>
+        <div v-if="gitBackend" data-cat="sync"><ProxySettings /></div>
 
         <section data-cat="writing">
           <label>
             <input type="checkbox" :checked="settings.spellcheckEnabled" @change="settings.toggleSpellcheckEnabled()" />
             {{ t('settings.spellcheckEnabled') }}
           </label>
+          <!-- #246 — only en_US ships with the app; anything the user drops in
+               `<config>/dictionaries/` shows up here. Without this the checker
+               flagged every word for non-English writers. It belongs to the
+               Hunspell checkbox: it used to hang off the browser spell-check
+               toggle below, so ticking this box revealed nothing. -->
+          <div v-if="settings.spellcheckEnabled" class="ghs-row" style="align-items:center; gap:8px; margin-top:6px;">
+            <span>{{ t('settings.spellcheckLang') }}</span>
+            <select
+              class="ghs-select"
+              :value="settings.spellcheckLang"
+              @focus="refreshSpellDicts"
+              @change="settings.setSpellcheckLang(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="code in spellDicts" :key="code" :value="code">{{ code }}</option>
+            </select>
+            <button type="button" class="link-button" @click="openDictsFolder">
+              {{ t('settings.spellcheckAddDict') }}
+            </button>
+          </div>
+          <p v-if="settings.spellcheckEnabled" class="setting-hint">{{ t('settings.spellcheckLangHint') }}</p>
         </section>
 
         <section data-cat="integrations">
@@ -692,7 +1404,59 @@ function onSelectPdfFont(v: string) {
           </div>
         </section>
 
-        <!-- v2.5 F3: PDF / print export defaults. -->
+        <section v-if="!isPhoneOrTablet" data-cat="integrations">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.quickCaptureEnabled"
+              @change="settings.toggleQuickCapture()"
+            />
+            {{ t('settings.quickCapture') }}
+          </label>
+          <p class="setting-hint">{{ t('settings.quickCaptureHint') }}</p>
+          <input
+            type="text"
+            :value="settings.quickCaptureShortcut"
+            :disabled="!settings.quickCaptureEnabled"
+            spellcheck="false"
+            placeholder="CmdOrCtrl+Alt+M"
+            @change="settings.setQuickCaptureShortcut(($event.target as HTMLInputElement).value)"
+            style="margin-top: 6px; padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; font: inherit; width: 100%;"
+          />
+          <p v-if="quickCaptureError" class="setting-hint" style="color: var(--danger);">
+            {{ t('settings.quickCaptureFailed', { error: quickCaptureError }) }}
+          </p>
+        </section>
+
+        <section data-cat="export">
+          <label>{{ t('settings.docxPreset') }}</label>
+          <select
+            :value="settings.docxPreset"
+            @change="settings.setDocxPreset(($event.target as HTMLSelectElement).value as 'plain' | 'report' | 'academic')"
+          >
+            <option value="plain">{{ t('settings.docxPresetPlain') }}</option>
+            <option value="report">{{ t('settings.docxPresetReport') }}</option>
+            <option value="academic">{{ t('settings.docxPresetAcademic') }}</option>
+          </select>
+          <p class="setting-hint">{{ t('settings.docxPresetHint') }}</p>
+        </section>
+
+        <section data-cat="export">
+          <label>{{ t('settings.printTheme') }}</label>
+          <select
+            :value="settings.printTheme"
+            @change="settings.setPrintTheme(($event.target as HTMLSelectElement).value as 'light' | 'dark' | 'follow')"
+          >
+            <option value="light">{{ t('settings.printThemeLight') }}</option>
+            <option value="dark">{{ t('settings.printThemeDark') }}</option>
+            <option value="follow">{{ t('settings.printThemeFollow') }}</option>
+          </select>
+          <p class="setting-hint">{{ t('settings.printThemeHint') }}</p>
+        </section>
+
+        <!-- v2.5 F3: PDF / print export defaults. #347 — the heading sits right
+             above its controls; it used to be separated from them by the
+             Word template and print theme, and read as an empty section. -->
         <section data-cat="export">
           <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin: 18px 0 6px;">
             {{ t('settings.pdfDefaults.heading') }}
@@ -706,12 +1470,14 @@ function onSelectPdfFont(v: string) {
             :value="settings.pdfDefaults.pageSize"
             @change="settings.setPdfDefaults({ pageSize: ($event.target as HTMLSelectElement).value as any })"
           >
+            <option value="Auto">{{ t('settings.pdfDefaults.pageSizeAuto') }}</option>
             <option value="A4">A4 (210 × 297 mm)</option>
             <option value="A5">A5 (148 × 210 mm)</option>
             <option value="Letter">{{ t('settings.pdfDefaults.letter') }} (8.5 × 11 in)</option>
             <option value="Legal">{{ t('settings.pdfDefaults.legal') }} (8.5 × 14 in)</option>
             <option value="Custom">{{ t('settings.pdfDefaults.custom') }}</option>
           </select>
+          <p class="setting-hint">{{ t('settings.pdfDefaults.pageSizeHint') }}</p>
           <div
             v-if="settings.pdfDefaults.pageSize === 'Custom'"
             class="row"
@@ -834,6 +1600,17 @@ function onSelectPdfFont(v: string) {
               @change="settings.setPdfDefaults({ footer: ($event.target as HTMLInputElement).checked })"
             />
             {{ t('settings.pdfDefaults.footer') }}
+          </label>
+        </section>
+
+        <section data-cat="export">
+          <label>
+            <input
+              type="checkbox"
+              :checked="settings.pdfDefaults.toc"
+              @change="settings.setPdfDefaults({ toc: ($event.target as HTMLInputElement).checked })"
+            />
+            {{ t('settings.pdfDefaults.toc') }}
           </label>
         </section>
 
@@ -1048,6 +1825,87 @@ function onSelectPdfFont(v: string) {
           </template>
         </template>
 
+        <section data-cat="keys">
+          <p class="setting-hint" style="margin-top:0;">{{ t('settings.keysHint') }}</p>
+          <div v-if="intercepted.length" class="kb-clash">
+            <p class="kb-clash__title">⚠ {{ t('settings.keysInterceptedTitle') }}</p>
+            <p class="kb-clash__body">{{ t('settings.keysInterceptedBody') }}</p>
+            <ul class="kb-clash__list">
+              <li v-for="b in intercepted" :key="b.action.id">
+                <kbd class="kb-chip">{{ formatCombo(b.combo, macKeys) }}</kbd>
+                {{ actionLabel(b.action) }}
+                <span class="kb-clash__source">— {{ b.source }}</span>
+                <span class="kb-clash__arrow">→</span>
+                <kbd class="kb-chip">{{ formatCombo(b.alternative, macKeys) }}</kbd>
+              </li>
+            </ul>
+            <button class="kb-btn kb-btn--wide" @click="applyHotkeyCompatPreset()">
+              {{ t('settings.keysApplyCompat') }}
+            </button>
+          </div>
+          <div class="kb-clash kb-clash--neutral">
+            <p class="kb-clash__title">{{ t('settings.keysWriterTitle') }}</p>
+            <p class="kb-clash__body">{{ t('settings.keysWriterBody', writerPresetKeys) }}</p>
+            <button v-if="!writerPresetOn" class="kb-btn kb-btn--wide" @click="applyWriterPreset()">
+              {{ t('settings.keysWriterApply', writerPresetKeys) }}
+            </button>
+            <button v-else class="kb-btn kb-btn--wide" @click="undoWriterPreset()">
+              ✓ {{ t('settings.keysWriterUndo') }}
+            </button>
+          </div>
+          <label class="kb-hints-toggle">
+            <input type="checkbox" :checked="settings.formatHints" @change="settings.toggleFormatHints()" />
+            {{ t('settings.formatHints') }}
+          </label>
+          <input
+            v-model="keyQuery"
+            class="kb-search"
+            type="search"
+            :placeholder="t('settings.keysSearch')"
+          />
+          <p v-if="!keyGroups.length" class="setting-hint">{{ t('settings.keysNoMatch') }}</p>
+          <div v-for="group in keyGroups" :key="group.key" class="kb-group">
+            <h4 class="kb-group__title">{{ t('settings.keysCat' + group.key.charAt(0).toUpperCase() + group.key.slice(1)) }}</h4>
+            <div v-for="action in group.items" :key="action.id" class="kb-row">
+              <span class="kb-row__label">{{ actionLabel(action) }}</span>
+              <span class="kb-row__combos">
+                <template v-if="recordingAction === action.id">
+                  <kbd class="kb-chip kb-chip--recording">{{ t('settings.keysRecording') }}</kbd>
+                </template>
+                <template v-else-if="actionCombos(action).length">
+                  <kbd
+                    v-for="c in actionCombos(action)"
+                    :key="c"
+                    class="kb-chip"
+                    :class="{ 'kb-chip--intercepted': interceptedIds.has(action.id) }"
+                    :title="
+                      interceptedIds.has(action.id)
+                        ? t('settings.keysInterceptedBy', { source: interceptionFor(action)?.source || '' })
+                        : undefined
+                    "
+                  >{{ c }}<span v-if="interceptedIds.has(action.id)" class="kb-chip__warn">⚠</span></kbd>
+                </template>
+                <span v-else class="kb-row__unbound">{{ t('settings.keysUnbound') }}</span>
+              </span>
+              <span class="kb-row__actions">
+                <button
+                  class="kb-btn"
+                  :disabled="recordingAction !== null && recordingAction !== action.id"
+                  @click="recordingAction === action.id ? stopRecording() : startRecording(action.id)"
+                >{{ recordingAction === action.id ? t('settings.keysCancel') : t('settings.keysChange') }}</button>
+                <button class="kb-btn" @click="settings.setKeybinding(action.id, null)">{{ t('settings.keysUnbind') }}</button>
+                <button
+                  class="kb-btn"
+                  :disabled="!isCustomised(action)"
+                  @click="settings.setKeybinding(action.id, undefined)"
+                >{{ t('settings.keysReset') }}</button>
+              </span>
+            </div>
+          </div>
+          <p v-if="recordError" class="kb-error">{{ recordError }}</p>
+          <button class="kb-btn kb-btn--wide" @click="settings.resetKeybindings()">{{ t('settings.keysResetAll') }}</button>
+        </section>
+
         <section data-cat="advanced">
           <label>{{ t('settings.dailyNotesFolder') }}</label>
           <input
@@ -1094,7 +1952,8 @@ function onSelectPdfFont(v: string) {
         <div data-cat="integrations"><IntegrationsSettings /></div>
 
         <!-- v4.0 Pillar 2: Agent Recipes. -->
-        <div v-if="!IS_APP_STORE_BUILD" data-cat="integrations"><RecipesSettings /></div>
+        <!-- #230 — recipe_runner is desktop/iOS only (git-backed receipts). -->
+        <div v-if="!IS_APP_STORE_BUILD && gitBackend" data-cat="integrations"><RecipesSettings /></div>
 
         <section data-cat="writing">
           <label>
@@ -1108,6 +1967,11 @@ function onSelectPdfFont(v: string) {
             <input type="checkbox" :checked="settings.focusMode" @change="settings.toggleFocusMode()" />
             {{ t('settings.focusMode') }}
           </label>
+          <label>
+            <input type="checkbox" :checked="settings.toolbarHidden" @change="settings.toggleToolbarHidden()" />
+            {{ t('settings.toolbarHidden') }}
+          </label>
+          <p class="setting-hint">{{ withChord('settings.toolbarHiddenHint', 'view.toggleToolbar') }}</p>
         </section>
 
         <section data-cat="writing">
@@ -1123,7 +1987,7 @@ function onSelectPdfFont(v: string) {
             {{ t('pomodoro.showControls') }}
           </label>
           <p style="font-size: 11px; color: var(--text-faint); margin: 4px 0 8px; line-height: 1.5;">
-            {{ t('pomodoro.showControlsHint') }}
+            {{ withChord('pomodoro.showControlsHint', 'pomodoro.startLast') }}
           </p>
           <label>
             <input
@@ -1173,6 +2037,21 @@ function onSelectPdfFont(v: string) {
             <input type="checkbox" :checked="settings.vimMode" @change="settings.toggleVimMode()" />
             {{ t('settings.vimMode') }}
           </label>
+        </section>
+
+        <section v-if="windowsEditorRuntime" data-cat="writing">
+          <label>{{ t('settings.windowsEditorEngine') }}</label>
+          <select
+            :value="settings.vimMode ? 'codemirror' : settings.windowsEditorEngine"
+            :disabled="settings.vimMode"
+            @change="settings.setWindowsEditorEngine(($event.target as HTMLSelectElement).value as 'native' | 'codemirror')"
+          >
+            <option value="native">{{ t('settings.windowsEditorEngineNative') }}</option>
+            <option value="codemirror">{{ t('settings.windowsEditorEngineCodeMirror') }}</option>
+          </select>
+          <p class="setting-hint">
+            {{ settings.vimMode ? t('settings.windowsEditorEngineVimHint') : t('settings.windowsEditorEngineHint') }}
+          </p>
         </section>
 
         <section data-cat="writing">
@@ -1315,8 +2194,14 @@ function onSelectPdfFont(v: string) {
             <button @click="openThemeMarketplace">{{ t('themes.browseBtn') }}</button>
             <button v-if="settings.customCssPath" @click="settings.setCustomCssPath('')">{{ t('settings.clear') }}</button>
           </div>
-          <div v-if="settings.customCssPath" style="font-size: 11px; color: var(--text-faint); word-break: break-all; margin-top: 4px;">
-            {{ settings.customCssPath }}
+          <div v-if="settings.customCssPath" class="css-path-row" style="font-size: 11px; color: var(--text-faint); word-break: break-all; margin-top: 4px;">
+            <span>{{ settings.customCssPath }}</span>
+            <button type="button" class="refresh-css-btn" :title="t('settings.refreshCss')" :aria-label="t('settings.refreshCss')" :disabled="isCssRefreshing" @click="refreshCustomCss">
+              <svg :class="{ 'is-spinning': isCssRefreshing }" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
           </div>
           <p class="setting-hint">{{ t('themes.browseHint') }}</p>
         </section>
@@ -1355,6 +2240,112 @@ function onSelectPdfFont(v: string) {
 </template>
 
 <style scoped>
+/* #180 shortcut editor */
+.kb-clash {
+  border: 1px solid var(--warning-border, rgba(214, 145, 22, 0.45));
+  background: var(--warning-bg, rgba(214, 145, 22, 0.08));
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Same box, no alarm: an offer rather than a warning (#296). */
+.kb-hints-toggle {
+  display: block;
+  margin: 2px 0 10px;
+}
+.kb-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.kb-clash--neutral {
+  border-color: var(--border);
+  background: var(--bg-soft, transparent);
+  margin-bottom: 10px;
+}
+.kb-clash__title {
+  margin: 0;
+  font-weight: 600;
+}
+.kb-clash__body {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.kb-clash__list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.kb-clash__source {
+  opacity: 0.7;
+}
+.kb-clash__arrow {
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.kb-chip--intercepted {
+  border-color: var(--warning-border, rgba(214, 145, 22, 0.6));
+}
+.kb-chip__warn {
+  margin-left: 3px;
+  font-size: 10px;
+}
+.kb-group { margin-bottom: 14px; }
+.kb-group__title {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.kb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+.kb-row__label { flex: 1; min-width: 0; font-size: 13px; }
+.kb-row__combos { display: flex; gap: 4px; flex-shrink: 0; }
+.kb-row__unbound { font-size: 11px; color: var(--text-faint); }
+.kb-chip {
+  font: 11px/1.6 var(--font-mono, monospace);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft, var(--bg));
+  white-space: nowrap;
+}
+.kb-chip--recording { border-color: var(--accent); color: var(--accent); }
+.kb-row__actions { display: flex; gap: 4px; flex-shrink: 0; }
+.kb-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.kb-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.kb-btn:disabled { opacity: 0.35; cursor: default; }
+.kb-btn--wide { margin-top: 10px; padding: 5px 12px; }
+.kb-error { color: var(--danger, #e5484d); font-size: 12px; margin: 8px 0 0; }
+
 /* DsModal supplies the backdrop / frame / header (title + close). Zero its
    body padding so the two-column nav+body layout fills the panel edge-to-edge,
    and give the panel a fixed working height like the old shell. */
@@ -1412,9 +2403,13 @@ function onSelectPdfFont(v: string) {
   flex: 1;
 }
 /* v3.0 — single-source-of-truth visibility: each section/component
-   gets data-cat="basics|writing|sync|integrations|export|advanced",
+   gets data-cat="basics|writing|sync|integrations|export|keys|advanced",
    the body's data-active-cat determines which subset renders. Saves
-   wrapping every section in v-if. */
+   wrapping every section in v-if.
+
+   Every id in the `categories` array above needs a line in the show-list
+   below, or its page renders blank — the hide rule catches it and nothing
+   brings it back. That is how #180's `keys` page shipped empty. */
 .settings__body[data-active-cat] > [data-cat] {
   display: none;
 }
@@ -1423,10 +2418,139 @@ function onSelectPdfFont(v: string) {
 .settings__body[data-active-cat="sync"] > [data-cat="sync"],
 .settings__body[data-active-cat="integrations"] > [data-cat="integrations"],
 .settings__body[data-active-cat="export"] > [data-cat="export"],
+.settings__body[data-active-cat="keys"] > [data-cat="keys"],
 .settings__body[data-active-cat="advanced"] > [data-cat="advanced"] {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.settings__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.settings__search-input {
+  flex: 0 1 340px;
+  min-width: 0;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.settings__search-input:focus {
+  border-color: var(--accent);
+}
+.settings__search-count {
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.settings__search-steps {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.settings__search-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.settings__search-step:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.settings__search-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+:root.narrow-viewport .settings__search-step {
+  width: 36px;
+  height: 36px;
+}
+/* Phone: the whole dialog body scrolls, so without this the search box and
+   its previous/next buttons scroll away the moment you step to a match.
+   Sticky offsets are measured inside the scroller's padding; the negative
+   top (DsModal's body padding) pins it to the visible edge instead of
+   leaving a strip of settings showing above it. */
+:root.narrow-viewport .settings__search {
+  position: sticky;
+  top: calc(-1 * var(--sp-5, 24px));
+  z-index: 2;
+  background: var(--bg-elev);
+}
+.settings__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* Stepping through matches: a quiet accent ring on the current match, and a
+   one-off pulse when it is reached. Reduced motion keeps the ring only. */
+.settings__body[data-searching] > [data-hit-current] {
+  /* A tinted halo 6px past the block's edge (so the ring never touches the
+     text) with a thin accent line around it. */
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--accent) 7%, transparent),
+    0 0 0 7px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.settings__body[data-searching] > [data-hit-flash] {
+  animation: settings-hit-pulse 1.1s ease-out;
+}
+@keyframes settings-hit-pulse {
+  0% {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--accent) 24%, transparent),
+      0 0 0 9px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  100% {
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--accent) 7%, transparent),
+      0 0 0 7px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings__body[data-searching] > [data-hit-flash] {
+    animation: none;
+  }
+}
+/* Search mode: every category's blocks are candidates; only matches show. */
+.settings__body[data-searching] > [data-cat]:not([data-match="1"]) {
+  display: none;
+}
+.settings__search-group {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 6px 0 -8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.settings__search-empty {
+  order: -1;
+  color: var(--text-faint);
+  font-size: 13px;
+  margin: 24px 0;
+  text-align: center;
 }
 .settings__body {
   flex: 1;
@@ -1466,6 +2590,56 @@ section > label:not(:has(input)) {
 .setting-hint a {
   color: var(--accent);
   text-decoration: underline;
+}
+/* #282 — "your theme choice is not reaching the screen" is not a footnote;
+   it explains why the control right above it looks broken. */
+.setting-hint--warn {
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+.hint-btn {
+  padding: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.css-path-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.css-path-row > span {
+  min-width: 0;
+}
+.refresh-css-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.refresh-css-btn:hover {
+  background: var(--bg-soft, rgba(0, 0, 0, 0.05));
+  color: var(--accent);
+}
+.refresh-css-btn svg.is-spinning {
+  animation: refresh-css-spin 0.7s linear infinite;
+}
+@keyframes refresh-css-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 /* Image-upload (图床) text/password fields — match the inline-styled inputs
    used elsewhere in this panel. */

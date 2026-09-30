@@ -35,13 +35,28 @@ const showPreview = computed(
     settings.viewMode !== 'liveEdit'
 );
 
+// Split view with live sync off: the preview renders what's on disk, so it
+// only moves when the file is saved (manually or by autosave). A tab that
+// has never been saved has nothing on disk yet — keep it live so the preview
+// isn't blank. Other view modes always follow the buffer.
+const previewSource = computed(() => {
+  const tab = props.tab;
+  if (!tab) return '';
+  if (settings.viewMode !== 'split' || settings.splitLiveSync || !tab.filePath) {
+    return tab.content;
+  }
+  return tab.savedContent;
+});
+
 const isFocused = computed(() => tiles.focusedPaneId === props.paneId);
 const windowsEditorRuntime = isWindowsEditorRuntime();
 // Preserve CodeMirror history/caret on macOS and Linux. Only Windows needs a
-// remount because toggling Vim changes the editor implementation itself.
+// remount because toggling Vim or the editor engine changes the editor
+// implementation itself.
 const editorImplementationKey = computed(() => {
   if (!windowsEditorRuntime) return `${props.paneId}:codemirror`;
-  return `${props.paneId}:${shouldUsePlainWindowsEditor(true, settings.vimMode) ? 'plain' : 'vim'}`;
+  const plain = shouldUsePlainWindowsEditor(true, settings.vimMode, settings.windowsEditorEngine);
+  return `${props.paneId}:${plain ? 'plain' : 'codemirror'}`;
 });
 
 function onCursor(line: number, col: number) {
@@ -113,7 +128,7 @@ function bindScrollSync() {
   syncEditorScroll = null;
   syncPreviewScroll = null;
 
-  if (settings.viewMode !== 'split') return;
+  if (settings.viewMode !== 'split' || !settings.splitLiveSync) return;
 
   const paneEl = document.querySelector(`[data-pane-id="${props.paneId}"]`);
   if (!paneEl) return;
@@ -305,6 +320,8 @@ watch(() => settings.viewMode, async (newMode, oldMode) => {
   bindScrollSync();
 });
 
+watch(() => settings.splitLiveSync, bindScrollSync);
+
 watch(() => props.tab?.id, async () => {
   await new Promise((r) => setTimeout(r, 100));
   bindScrollSync();
@@ -319,6 +336,9 @@ onMounted(() => {
   window.addEventListener('solomd:upload-local-images', onUploadLocalImagesEvent);
   window.addEventListener('solomd:editor-find', onEditorFindEvent);
   window.addEventListener('solomd:preview-search', onPreviewSearchEvent);
+  window.addEventListener('solomd:fold', onFoldEvent);
+  window.addEventListener('solomd:edit-table', onEditTableEvent);
+  window.addEventListener('solomd:edit-formula', onEditFormulaEvent);
 });
 
 onBeforeUnmount(() => {
@@ -331,9 +351,21 @@ onBeforeUnmount(() => {
   window.removeEventListener('solomd:upload-local-images', onUploadLocalImagesEvent);
   window.removeEventListener('solomd:editor-find', onEditorFindEvent);
   window.removeEventListener('solomd:preview-search', onPreviewSearchEvent);
+  window.removeEventListener('solomd:fold', onFoldEvent);
+  window.removeEventListener('solomd:edit-table', onEditTableEvent);
+  window.removeEventListener('solomd:edit-formula', onEditFormulaEvent);
 });
 
 defineExpose({ gotoLine, editorRef });
+
+// #350 — preview mode has no editor cursor to follow, so hand the preview's
+// reading position to the outline instead. Split mode keeps the cursor.
+function onPreviewTopline(line: number) {
+  if (settings.viewMode !== 'preview') return;
+  window.dispatchEvent(new CustomEvent('solomd:preview-topline', {
+    detail: { line, paneId: props.paneId },
+  }));
+}
 
 function onOutlineGotoEvent(e: Event) {
   const { line, paneId } = (e as CustomEvent).detail;
@@ -378,6 +410,35 @@ function onEditorFindEvent(e: Event) {
   ed?.openFind?.();
 }
 
+/** Formula editor — same focused-pane routing as find. */
+function onEditFormulaEvent(e: Event) {
+  const { paneId } = (e as CustomEvent).detail || {};
+  if (paneId && paneId !== props.paneId) return;
+  if (!paneId && !isFocused.value) return;
+  const ed = editorRef.value as unknown as { openFormulaAtCursor?: () => void } | null;
+  ed?.openFormulaAtCursor?.();
+}
+
+/** Grid table editor — same focused-pane routing as find. */
+function onEditTableEvent(e: Event) {
+  const { paneId } = (e as CustomEvent).detail || {};
+  if (paneId && paneId !== props.paneId) return;
+  if (!paneId && !isFocused.value) return;
+  const ed = editorRef.value as unknown as { openTableAtCursor?: () => void } | null;
+  ed?.openTableAtCursor?.();
+}
+
+/** Heading folding — same focused-pane routing as find (#fold). */
+function onFoldEvent(e: Event) {
+  const { paneId, action, level } = (e as CustomEvent).detail || {};
+  if (paneId && paneId !== props.paneId) return;
+  if (!paneId && !isFocused.value) return;
+  const ed = editorRef.value as unknown as {
+    applyFold?: (a: string, l?: number) => void;
+  } | null;
+  ed?.applyFold?.(action || 'toggle', level);
+}
+
 function onPreviewSearchEvent(e: Event) {
   const { paneId } = (e as CustomEvent).detail;
   if (paneId !== props.paneId) return;
@@ -386,7 +447,16 @@ function onPreviewSearchEvent(e: Event) {
 </script>
 
 <template>
-  <div class="pane-content">
+  <!-- #279 — "现在都一样看着有点累": side by side, the two panes are the same
+       surface, so the split reads as one wide column. The opt-in class lifts
+       the preview a shade; it only applies when BOTH panes are on screen,
+       because there is nothing to tell apart otherwise. -->
+  <div
+    class="pane-content"
+    :class="{
+      'pane-content--distinct': settings.distinctSplitPanes && showEditor && showPreview,
+    }"
+  >
     <div class="pane pane--editor" v-if="showEditor && tab">
       <Editor
         :key="editorImplementationKey"
@@ -402,9 +472,10 @@ function onPreviewSearchEvent(e: Event) {
     <div class="pane pane--preview" v-if="showPreview && tab">
       <Preview
         ref="previewRef"
-        :source="tab.content"
+        :source="previewSource"
         :file-path="tab.filePath"
         :tab-id="tab.id"
+        @topline="onPreviewTopline"
       />
     </div>
   </div>
@@ -418,6 +489,8 @@ function onPreviewSearchEvent(e: Event) {
   min-height: 0;
   overflow: hidden;
 }
+/* #168 phone layout for these panes lives in styles/main.css — a scoped
+   block can't reach it: `:global(.x) .y` compiles down to `.x` here. */
 .pane {
   flex: 1;
   min-width: 0;

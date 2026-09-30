@@ -120,7 +120,40 @@ export const draculaTheme = mkTheme(
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { Theme } from '../types';
 
-export function cmThemeFor(theme: Theme): Extension {
+/** Which half of a light/dark pair a built-in theme belongs to. */
+export function themeFamily(theme: Theme): 'light' | 'dark' {
+  switch (theme) {
+    case 'light':
+    case 'github-light':
+    case 'solarized-light':
+      return 'light';
+    default:
+      return 'dark';
+  }
+}
+
+/**
+ * Mermaid's built-in theme for a SoloMD theme: 'dark' for every dark theme
+ * (Nord, Dracula, Monokai, Solarized Dark…), not only the one named "dark".
+ * Live edit, the Windows editor and preview all use this, so a diagram looks
+ * the same in each (#354).
+ */
+export function mermaidThemeFor(theme: Theme): 'dark' | 'default' {
+  return themeFamily(theme) === 'dark' ? 'dark' : 'default';
+}
+
+/**
+ * With a custom CSS theme active, only the light/dark family of the built-in
+ * choice survives (#346). Marketplace themes key their palette on `:root`,
+ * `:root[data-theme="light"]` and `:root[data-theme="dark"]`. Every other
+ * built-in writes its own name into data-theme ("github-light", "nord", …),
+ * and the app's `:root[data-theme="<name>"]` palette out-ranks a bare `:root`.
+ * The app's colours won while the theme's unscoped component rules painted
+ * dark panels, so text went dark on dark. The built-in's CodeMirror theme also
+ * kept its own white editor background.
+ */
+export function cmThemeFor(theme: Theme, customTheme = false): Extension {
+  if (customTheme) return themeFamily(theme) === 'dark' ? oneDark : [];
   switch (theme) {
     case 'dark': return oneDark;
     case 'nord': return nordTheme;
@@ -135,8 +168,8 @@ export function cmThemeFor(theme: Theme): Extension {
 
 // Each theme gets its own data-theme value so the UI shell (toolbar, tabs,
 // status bar) can style itself with theme-specific CSS variables.
-export function dataThemeFor(theme: Theme): string {
-  return theme;
+export function dataThemeFor(theme: Theme, customTheme = false): string {
+  return customTheme ? themeFamily(theme) : theme;
 }
 
 export const themeLabels: { value: Theme; label: string }[] = [

@@ -842,7 +842,16 @@ pub async fn run_recipe(
         }
     }
     let _ = handle.emit_run_ended(&final_meta);
-    let _ = handle.finalize(&final_meta);
+    // #248 — this used to swallow the error. When it failed (see the note in
+    // `RunHandle::finalize`) the run silently stayed "running" and vanished
+    // from Pending review, with nothing anywhere to explain why.
+    if let Err(e) = handle.finalize(&final_meta) {
+        eprintln!("recipe run {}: finalize failed: {e}", final_meta.run_id);
+        let _ = handle.append_step(serde_json::json!({
+            "kind": "note",
+            "text": format!("finalize failed: {e}"),
+        }));
+    }
 
     // Emit a UI event so the Recipes panel can refresh without polling.
     let _ = app.emit("solomd://recipes-run-finished", &final_meta);
@@ -1070,8 +1079,14 @@ async fn run_recipe_chat_loop(
         m.model = model.clone();
     }
 
+    // Keyless providers (local Ollama, a self-hosted OpenAI-compatible
+    // server declared as `provider: llama-cpp` / `lmstudio` / `vllm` /
+    // `openai-compat`) must not fail the recipe just because the keychain
+    // has nothing for them — there's no account to have a key for.
     let api_key = if api_format == "ollama" {
         String::new()
+    } else if ai_proxy::is_keyless_provider(&canonical_provider) {
+        ai_proxy::get_api_key(&canonical_provider).unwrap_or_default()
     } else {
         match ai_proxy::get_api_key(&canonical_provider) {
             Ok(k) => k,
